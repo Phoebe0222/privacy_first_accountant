@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+fastapi = "*"
+uvicorn = {extras = ["standard"], version = "*"}
+sqlalchemy = "*"
+pdfplumber = "*"
+httpx = "*"
+python-multipart = "*"
+imapclient = "*"
+beautifulsoup4 = "*"
+python-dateutil = "*"
+pillow = "*"
+chromadb = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"

@@ -1,0 +1,12 @@
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/node_modules
+**/.next
+**/venv
+**/.venv
+**/chroma_db
+**/accountant.db
+**/data
+.git
+*.sh
