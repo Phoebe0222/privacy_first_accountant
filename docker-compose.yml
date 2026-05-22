@@ -13,6 +13,19 @@ services:
       retries: 10
       start_period: 20s
 
+  ollama-init:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull llama3.2:3b && ollama pull nomic-embed-text"]
+    restart: "no"
+
   backend:
     build:
       context: .

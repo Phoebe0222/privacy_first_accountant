@@ -1,9 +1,16 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
 from backend.routers import transactions, imports, chat
 from backend.routers.rag_router import router as rag_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s | %(name)s | %(message)s",
+)
 
 app = FastAPI(title="Private Accountant API")
 

@@ -1,0 +1,195 @@
+import csv
+import io
+import re
+from backend.services.ai import OLLAMA_BASE, _parse_json, _ollama_generate
+
+MAPPING_PROMPT = """You are given the column headers and sample rows from a financial CSV export.
+The file may be from a bank, PayPal, Etsy, Stripe, Alibaba, a supplier, or any other source.
+
+Return a JSON object with these keys:
+
+{{
+  "date":             "<column name for the transaction date>",
+  "vendor":           "<column name for merchant/supplier/title — the human-readable label>",
+  "amount":           "<column name for the net/final dollar amount — prefer Net or Total over gross Amount>",
+  "type_col":         "<column whose values distinguish income from expense, or null if sign-based>",
+  "income_types":     ["<exact type_col values that mean money IN — e.g. Sale, Deposit, Payment Received>"],
+  "expense_types":    ["<exact type_col values that mean money OUT — e.g. Fee, GST, Shipping, Charge>"],
+  "exclude_types":    ["<exact type_col values that are noise/duplicates to skip — e.g. General Authorisation, General Credit Card Deposit, Pending>"],
+  "status_col":       "<column name for transaction status, or null>",
+  "completed_status": "<exact status value that means settled/completed, or null>",
+  "debit_col":        "<column for debit/withdrawal amounts if separate, else null>",
+  "credit_col":       "<column for credit/deposit amounts if separate, else null>",
+  "tax":              "<column for fee or tax amount, or null>",
+  "description":      "<secondary detail column, or null>",
+  "invoice_number":   "<column for order/invoice/transaction ID, or null>"
+}}
+
+Rules:
+- If income vs expense is determined by sign (negative = expense, positive = income), set type_col to null.
+- If there are separate debit and credit columns, set debit_col/credit_col and set amount to null.
+- Prefer Net or Total over a gross Amount column.
+- All string values in income_types, expense_types, exclude_types must be EXACT values from the sample rows.
+- For PayPal: exclude_types should include "General Authorisation" and "General Credit Card Deposit".
+- Return ONLY the JSON object, no explanation.
+
+CSV headers: {headers}
+
+Sample rows:
+{sample}"""
+
+
+async def map_columns(headers: list[str], sample_rows: list[dict]) -> dict:
+    sample_lines = "\n".join(
+        ", ".join(f'{k}: "{v}"' for k, v in row.items() if v and v != "--")
+        for row in sample_rows[:5]
+    )
+    safe_headers = ", ".join(f'"{h}"' for h in headers).replace("{", "{{").replace("}", "}}")
+    safe_sample = sample_lines.replace("{", "{{").replace("}", "}}")
+    prompt = MAPPING_PROMPT.format(headers=safe_headers, sample=safe_sample)
+    raw = await _ollama_generate(prompt)
+    mapping = _parse_json(raw)
+    # Resolve mapped column names case-insensitively against actual headers
+    header_map = {h.lower().strip(): h for h in headers}
+    resolved = {}
+    for field, val in mapping.items():
+        if val and isinstance(val, str):
+            resolved[field] = header_map.get(val.lower().strip(), val)
+        else:
+            resolved[field] = val
+    return resolved
+
+
+def parse_csv(file_bytes: bytes, filename: str = "") -> tuple[list[str], list[dict]]:
+    if filename.lower().endswith((".xlsx", ".xls")):
+        return _parse_excel(file_bytes)
+    text = file_bytes.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    headers = reader.fieldnames or []
+    rows = [dict(row) for row in reader]
+    return list(headers), rows
+
+
+def _parse_excel(file_bytes: bytes) -> tuple[list[str], list[dict]]:
+    import openpyxl
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+    ws = wb.active
+    rows_iter = iter(ws.rows)
+    header_row = next(rows_iter, None)
+    if header_row is None:
+        return [], []
+    headers = [str(cell.value).strip() if cell.value is not None else f"col_{i}" for i, cell in enumerate(header_row)]
+    rows = []
+    for row in rows_iter:
+        row_dict = {
+            headers[i]: (str(cell.value).strip() if cell.value is not None else "")
+            for i, cell in enumerate(row) if i < len(headers)
+        }
+        rows.append(row_dict)
+    wb.close()
+    return headers, rows
+
+
+def _clean_amount(raw: str) -> float:
+    """Parse amount strings from any common format."""
+    raw = raw.strip()
+    if not raw or raw == "--":
+        return 0.0
+    # Remove currency symbols and codes (AU$, $, £, €, USD, AUD, etc.)
+    raw = re.sub(r'[A-Z]{0,3}\$|[£€]', '', raw)
+    raw = raw.replace(",", "").replace(" ", "")
+    # Accounting negatives: (1234.56) → -1234.56
+    if raw.startswith("(") and raw.endswith(")"):
+        raw = "-" + raw[1:-1]
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
+    transactions = []
+    type_col = mapping.get("type_col")
+    income_types = {v.lower() for v in (mapping.get("income_types") or []) if v}
+    expense_types = {v.lower() for v in (mapping.get("expense_types") or []) if v}
+    exclude_types = {v.lower() for v in (mapping.get("exclude_types") or []) if v}
+    status_col = mapping.get("status_col")
+    completed_status = (mapping.get("completed_status") or "").lower().strip()
+    credit_col = mapping.get("credit_col")
+    debit_col = mapping.get("debit_col")
+    amount_col = mapping.get("amount")
+
+    for row in rows:
+        def get(field, r=row):
+            col = mapping.get(field)
+            return r.get(col, "").strip() if col and col in r else ""
+
+        # ── Skip rows that don't match the required status ───────────────────
+        if status_col and completed_status and status_col in row:
+            if row[status_col].strip().lower() != completed_status:
+                continue
+
+        # ── Skip excluded type values (noise/duplicates) ─────────────────────
+        if type_col and exclude_types and type_col in row:
+            if row[type_col].strip().lower() in exclude_types:
+                continue
+
+        # ── Determine amount and type ────────────────────────────────────────
+        if credit_col and debit_col:
+            credit = _clean_amount(row.get(credit_col, ""))
+            debit = _clean_amount(row.get(debit_col, ""))
+            if credit > 0:
+                tx_type, amount = "income", credit
+            elif debit > 0:
+                tx_type, amount = "expense", debit
+            else:
+                continue
+        else:
+            amount_raw = row.get(amount_col, "") if amount_col else ""
+            amount_val = _clean_amount(amount_raw)
+            if amount_val == 0:
+                continue
+
+            if type_col and type_col in row:
+                type_val = row[type_col].strip().lower()
+                if type_val in income_types:
+                    tx_type = "income"
+                elif type_val in expense_types:
+                    tx_type = "expense"
+                else:
+                    # Unknown type value — fall back to sign
+                    tx_type = "income" if amount_val > 0 else "expense"
+            else:
+                tx_type = "income" if amount_val > 0 else "expense"
+
+            amount = abs(amount_val)
+
+        date = get("date") or ""
+        vendor = get("vendor") or "Unknown"
+
+        transactions.append({
+            "date": _normalise_date(date),
+            "vendor": vendor[:200],
+            "amount": round(amount, 2),
+            "tax": round(abs(_clean_amount(get("tax"))), 2),
+            "type": tx_type,
+            "category": get("category") or "other",
+            "description": (get("description") or vendor)[:500],
+            "invoice_number": get("invoice_number") or None,
+        })
+    return transactions
+
+
+def _normalise_date(raw: str) -> str:
+    from datetime import datetime
+    raw = raw.strip()
+    # Strip time component if present (e.g. "2026-04-15 01:23:21" → "2026-04-15")
+    raw = raw.split(" ")[0].split("T")[0]
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y",
+                "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+                "%Y/%m/%d", "%d-%b-%Y"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return raw

@@ -15,6 +15,7 @@ beautifulsoup4 = "*"
 python-dateutil = "*"
 pillow = "*"
 chromadb = "*"
+openpyxl = "*"
 
 [dev-packages]
 

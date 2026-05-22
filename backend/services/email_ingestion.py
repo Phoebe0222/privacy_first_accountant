@@ -49,6 +49,27 @@ def _extract_text(msg: email.message.Message) -> str:
     return ""
 
 
+ATTACHMENT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
+ATTACHMENT_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
+
+def _extract_attachments(msg: email.message.Message) -> list[dict]:
+    attachments = []
+    for part in msg.walk():
+        disposition = part.get("Content-Disposition", "")
+        if "attachment" not in disposition and "inline" not in disposition:
+            continue
+        mime_type = part.get_content_type()
+        filename = part.get_filename() or ""
+        ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if mime_type not in ATTACHMENT_MIME_TYPES and ext not in ATTACHMENT_EXTENSIONS:
+            continue
+        payload = part.get_payload(decode=True)
+        if payload:
+            attachments.append({"filename": filename, "mime_type": mime_type, "bytes": payload})
+    return attachments
+
+
 def _is_financial(subject: str, body: str) -> bool:
     combined = (subject + " " + body[:500]).lower()
     return any(kw in combined for kw in FINANCIAL_KEYWORDS)
@@ -90,6 +111,7 @@ def fetch_emails(
                     "date": msg.get("Date", ""),
                     "body": body,
                     "raw_text": f"Subject: {subject}\nFrom: {msg.get('From','')}\nDate: {msg.get('Date','')}\n\n{body}",
+                    "attachments": _extract_attachments(msg),
                 }
             )
 
