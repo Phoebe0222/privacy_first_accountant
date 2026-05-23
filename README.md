@@ -129,7 +129,19 @@ Vector DB:
     - user feedback learning
 2. csv exports from different source are very different 
 2. Extraction / deduplication: When extracting a new transaction from an email or PDF, use RAG to search for similar existing transactions first  
+    ```
+    "AWS invoice $120"
+    → RAG finds: previous AWS transactions
+    → Prompt: "Here are past AWS transactions for reference: [...]
+            Categorise this new one consistently."
+    ```
 3. Anomaly detection: Before saving a transaction, search for similar past ones and compare the amount
+    ```
+    "Electricity bill $890"
+    → RAG finds: past electricity bills averaging $120
+    → Prompt: "Past bills averaged $120. This one is $890 — flag as anomaly?"
+
+    ```
 4. Vendor normalisation: Different emails might write the same vendor differently (AWS, Amazon Web Services, AMAZON WEB SVCS). RAG can find existing vendor names and prompt the model to match them.
 
 ## Roadmap
