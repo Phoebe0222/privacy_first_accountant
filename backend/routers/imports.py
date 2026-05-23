@@ -371,8 +371,8 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
 _FINANCIAL_RE = re.compile(
     r"[\$£€]|\binvoice\b|\bbill\b|\breceipt\b|\bpayment\b|\bcharge\b"
     r"|\bsubscription\b|amount due|due date|total due"
-    r"|order confirmation|\bstatement\b|\bfee\b|\bpayout\b"
-    r"|\brefund\b|\bdeposit\b|\bdebit\b|\bcredit\b",
+    r"|order confirmation|\bstatement\b|\bpayout\b"
+    r"|\brefund\b|\bdeposit\b",
     re.IGNORECASE,
 )
 _NON_FINANCIAL_RE = re.compile(

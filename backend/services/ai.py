@@ -116,7 +116,7 @@ async def _ollama_generate(prompt: str, retries: int = 3) -> str:
 
 
 async def extract_transaction(text: str) -> dict:
-    safe_text = text[:8000].replace("{", "{{").replace("}", "}}")
+    safe_text = text[:3000].replace("{", "{{").replace("}", "}}")
     prompt = EXTRACTION_PROMPT.format(text=safe_text)
     raw = await _ollama_generate(prompt)
     data = _parse_json(raw)
