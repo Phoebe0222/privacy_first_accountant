@@ -42,3 +42,12 @@ class ChatMessage(Base):
     role = Column(String)  # "user" or "assistant"
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class VendorRule(Base):
+    __tablename__ = "vendor_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    vendor_pattern = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

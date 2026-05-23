@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal, get_db
 from backend.models import EmailAccount, Transaction
-from backend.services.ai import extract_transaction, extract_from_image
+from backend.services.ai import extract_transaction, extract_from_image, categorize_vendors
 from backend.services import rag
 from backend.services.email_ingestion import fetch_emails
 from backend.services.pdf_ingestion import (
@@ -23,12 +23,25 @@ from backend.services.pdf_ingestion import (
     normalise_image,
 )
 from backend.services.csv_ingestion import map_columns, parse_csv, apply_mapping  # noqa: F401
+from backend.services.vendor_rules import BUILT_IN_RULES  # noqa: F401 (used via _load_category_rules)
+from backend.models import VendorRule
 
 _IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
 
 router = APIRouter(prefix="/import", tags=["import"])
 
 _jobs: dict[str, dict] = {}
+
+
+def _load_category_rules(db) -> list[tuple[str, str]]:
+    """Merge user-defined rules (highest priority) with built-in rules, longest-first."""
+    user_rules = db.query(VendorRule).all()
+    user_pairs = sorted(
+        [(r.vendor_pattern.lower().strip(), r.category) for r in user_rules],
+        key=lambda x: len(x[0]),
+        reverse=True,
+    )
+    return user_pairs + BUILT_IN_RULES
 
 
 class EmailAccountCreate(BaseModel):
@@ -149,6 +162,7 @@ async def _run_sync(
         financial_emails = [em for em in new_emails if _looks_financial(em)]
         log.info("EMAIL SYNC | pre-filter passed=%d  dropped=%d", len(financial_emails), len(new_emails) - len(financial_emails))
 
+        category_rules = _load_category_rules(db)
         sem = asyncio.Semaphore(3)
 
         async def _extract(em: dict):
@@ -169,7 +183,7 @@ async def _run_sync(
                     subject = em.get("subject", "").replace("\n", " ")
                     log.info("AI extracting | %s | %s", em.get("from", ""), subject)
                     t = time.monotonic()
-                    result = await extract_transaction(text)
+                    result = await extract_transaction(text, category_rules=category_rules)
                     log.info("AI done %.1fs | skip=%s vendor=%s amount=%s type=%s | %s",
                              time.monotonic() - t, result.get("skip"), result.get("vendor"),
                              result.get("amount"), result.get("type"), subject)
@@ -276,12 +290,13 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     if not raw_text.strip():
         raise HTTPException(status_code=422, detail="Could not extract text from file.")
 
-    data = await extract_transaction(raw_text)
+    category_rules = _load_category_rules(db)
+    data = await extract_transaction(raw_text, category_rules=category_rules)
     if not float(data.get("amount") or 0):
         raise HTTPException(status_code=422, detail="Could not extract a non-zero amount from file.")
     t = Transaction(
         date=data.get("date"),
-        vendor=data.get("vendor"),
+        vendor=data.get("vendor") or "",
         amount=float(data.get("amount") or 0),
         tax=float(data.get("tax") or 0),
         category=data.get("category") or "other",
@@ -339,6 +354,11 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
 
         db = SessionLocal()
         try:
+            category_rules = _load_category_rules(db)
+
+            unique_vendors = list({tx["vendor"] for tx in transactions if tx["vendor"]})
+            vendor_categories = await categorize_vendors(unique_vendors, category_rules=category_rules)
+
             added = 0
             for tx in transactions:
                 t = Transaction(
@@ -347,7 +367,7 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
                     amount=tx["amount"],
                     tax=tx["tax"],
                     type=tx["type"],
-                    category=tx["category"],
+                    category=vendor_categories.get(tx["vendor"]) or tx["category"] or "other",
                     description=tx["description"],
                     invoice_number=tx["invoice_number"],
                     source="csv",

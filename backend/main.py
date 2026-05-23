@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.database import init_db
 from backend.routers import transactions, imports, chat
 from backend.routers.rag_router import router as rag_router
+from backend.routers.vendor_rules import router as vendor_rules_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +27,7 @@ app.include_router(transactions.router)
 app.include_router(imports.router)
 app.include_router(chat.router)
 app.include_router(rag_router)
+app.include_router(vendor_rules_router)
 
 
 @app.on_event("startup")

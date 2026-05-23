@@ -30,7 +30,7 @@ Rules for "type" — read carefully:
 - Subject "Receipt for Your Payment" is ALWAYS an expense.
 - Default to "expense" when uncertain.
 
-Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
+{vendor_rules_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
 
 JSON format:
 {{
@@ -115,9 +115,50 @@ async def _ollama_generate(prompt: str, retries: int = 3) -> str:
     raise last_err
 
 
-async def extract_transaction(text: str) -> dict:
+def _format_vendor_rules_section(rules: list[tuple[str, str]] | None) -> str:
+    if not rules:
+        return ""
+    lines = "\n".join(f'  - "{pattern}" → {category}' for pattern, category in rules)
+    return (
+        "Category rules — if the vendor name contains any of these patterns (case-insensitive), "
+        "use the specified category:\n" + lines + "\n\n"
+    )
+
+
+CATEGORIZE_VENDORS_PROMPT = """Categorise each vendor name below into exactly one category.
+
+Valid categories: food, transport, utilities, software, marketing, revenue, salary, office, subscription, other
+
+{vendor_rules_section}Vendors to categorise:
+{vendors}
+
+Return ONLY a valid JSON object mapping each vendor name to its category, e.g.:
+{{
+  "Uber Technologies": "transport",
+  "AWS": "software"
+}}"""
+
+
+async def categorize_vendors(
+    vendors: list[str],
+    category_rules: list[tuple[str, str]] | None = None,
+) -> dict[str, str]:
+    if not vendors:
+        return {}
+    vendor_rules_section = _format_vendor_rules_section(category_rules)
+    safe_vendors = "\n".join(f"- {v}" for v in vendors).replace("{", "{{").replace("}", "}}")
+    prompt = CATEGORIZE_VENDORS_PROMPT.format(
+        vendor_rules_section=vendor_rules_section,
+        vendors=safe_vendors,
+    )
+    raw = await _ollama_generate(prompt)
+    return _parse_json(raw)
+
+
+async def extract_transaction(text: str, category_rules: list[tuple[str, str]] | None = None) -> dict:
     safe_text = text[:3000].replace("{", "{{").replace("}", "}}")
-    prompt = EXTRACTION_PROMPT.format(text=safe_text)
+    vendor_rules_section = _format_vendor_rules_section(category_rules)
+    prompt = EXTRACTION_PROMPT.format(text=safe_text, vendor_rules_section=vendor_rules_section)
     raw = await _ollama_generate(prompt)
     data = _parse_json(raw)
     data.setdefault("tax", 0.0)

@@ -125,6 +125,8 @@ Vector DB:
     AWS → Hosting
     Officeworks → Office Supplies
     ```
+    email extract: rules added in prompt
+    csv extract: column mapping prompt -> categorize prompt 
     - ML classification
     - user feedback learning
 2. csv exports from different source are very different 
