@@ -93,26 +93,39 @@ def fetch_emails(
         if not uids:
             return results
 
-        messages = client.fetch(uids, ["RFC822", "ENVELOPE"])
+        # Step 1: fetch only headers for all emails (fast — no bodies/attachments)
+        headers = client.fetch(uids, ["BODY[HEADER.FIELDS (SUBJECT FROM DATE)]"])
+        financial_uids = []
+        for uid, data in headers.items():
+            raw_header = data[b"BODY[HEADER.FIELDS (SUBJECT FROM DATE)]"]
+            msg = email.message_from_bytes(raw_header)
+            subject = _decode_header_value(msg.get("Subject", ""))
+            sender = _decode_header_value(msg.get("From", ""))
+            if _is_financial(subject, ""):
+                financial_uids.append((uid, subject, sender, msg.get("Date", "")))
+
+        if not financial_uids:
+            return results
+
+        # Step 2: fetch full RFC822 only for emails that passed the subject filter
+        full_uids = [uid for uid, *_ in financial_uids]
+        messages = client.fetch(full_uids, ["RFC822"])
+        uid_meta = {uid: (subject, sender, date) for uid, subject, sender, date in financial_uids}
+
         for uid, data in messages.items():
             raw = data[b"RFC822"]
             msg = email.message_from_bytes(raw)
-            subject = _decode_header_value(msg.get("Subject", ""))
+            subject, sender, date = uid_meta.get(uid, ("", "", ""))
             body = _extract_text(msg)
 
-            if not _is_financial(subject, body):
-                continue
-
-            results.append(
-                {
-                    "uid": str(uid),
-                    "subject": subject,
-                    "from": _decode_header_value(msg.get("From", "")),
-                    "date": msg.get("Date", ""),
-                    "body": body,
-                    "raw_text": f"Subject: {subject}\nFrom: {msg.get('From','')}\nDate: {msg.get('Date','')}\n\n{body}",
-                    "attachments": _extract_attachments(msg),
-                }
-            )
+            results.append({
+                "uid": str(uid),
+                "subject": subject,
+                "from": sender,
+                "date": date,
+                "body": body,
+                "raw_text": f"Subject: {subject}\nFrom: {sender}\nDate: {date}\n\n{body}",
+                "attachments": _extract_attachments(msg),
+            })
 
     return results

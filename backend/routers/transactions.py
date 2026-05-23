@@ -1,38 +1,15 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import Transaction
+from backend.schemas import TransactionCreate, TransactionUpdate
 from backend.services import rag
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
-
-
-class TransactionCreate(BaseModel):
-    date: str
-    vendor: str
-    amount: float
-    tax: float = 0.0
-    category: str
-    type: str
-    source: str = "manual"
-    description: Optional[str] = None
-    invoice_number: Optional[str] = None
-
-
-class TransactionUpdate(BaseModel):
-    date: Optional[str] = None
-    vendor: Optional[str] = None
-    amount: Optional[float] = None
-    tax: Optional[float] = None
-    category: Optional[str] = None
-    type: Optional[str] = None
-    description: Optional[str] = None
-    invoice_number: Optional[str] = None
 
 
 @router.get("")
@@ -142,5 +119,7 @@ def _serialize(t: Transaction) -> dict:
         "source": t.source,
         "description": t.description,
         "invoice_number": t.invoice_number,
+        "anomaly": t.anomaly or False,
+        "anomaly_reason": t.anomaly_reason,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }

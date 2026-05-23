@@ -1,18 +1,14 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import ChatMessage, Transaction
+from backend.schemas import ChatRequest
 from backend.services.ai import chat as ai_chat
 from backend.services import rag
 
 router = APIRouter(prefix="/chat", tags=["chat"])
-
-
-class ChatRequest(BaseModel):
-    message: str
 
 
 @router.post("")

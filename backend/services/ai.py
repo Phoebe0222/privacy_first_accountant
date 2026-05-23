@@ -30,7 +30,7 @@ Rules for "type" — read carefully:
 - Subject "Receipt for Your Payment" is ALWAYS an expense.
 - Default to "expense" when uncertain.
 
-{vendor_rules_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
+{vendor_rules_section}{similar_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
 
 JSON format:
 {{
@@ -42,7 +42,9 @@ JSON format:
   "category": "one of: food, transport, utilities, software, marketing, revenue, salary, office, subscription, other",
   "type": "expense or income — see rules above",
   "description": "one-line summary",
-  "invoice_number": "string or null"
+  "invoice_number": "string or null",
+  "anomaly": false,
+  "anomaly_reason": "brief explanation if anomaly is true, else null"
 }}
 
 Text:
@@ -155,15 +157,94 @@ async def categorize_vendors(
     return _parse_json(raw)
 
 
-async def extract_transaction(text: str, category_rules: list[tuple[str, str]] | None = None) -> dict:
+def _format_similar_section(similar: list[str] | None) -> str:
+    if not similar:
+        return ""
+    entries = "\n---\n".join(similar[:5])
+    return (
+        "Past similar transactions from your records (use for categorisation and anomaly detection):\n"
+        + entries
+        + "\n\nIf the current amount differs significantly (more than 2x) from past amounts for the same vendor, "
+        "set anomaly to true and explain briefly in anomaly_reason.\n\n"
+    )
+
+
+async def extract_transaction(
+    text: str,
+    category_rules: list[tuple[str, str]] | None = None,
+    similar_transactions: list[str] | None = None,
+) -> dict:
     safe_text = text[:3000].replace("{", "{{").replace("}", "}}")
     vendor_rules_section = _format_vendor_rules_section(category_rules)
-    prompt = EXTRACTION_PROMPT.format(text=safe_text, vendor_rules_section=vendor_rules_section)
+    similar_section = _format_similar_section(similar_transactions).replace("{", "{{").replace("}", "}}")
+    prompt = EXTRACTION_PROMPT.format(
+        text=safe_text,
+        vendor_rules_section=vendor_rules_section,
+        similar_section=similar_section,
+    )
     raw = await _ollama_generate(prompt)
     data = _parse_json(raw)
     data.setdefault("tax", 0.0)
     data.setdefault("invoice_number", None)
+    data.setdefault("anomaly", False)
+    data.setdefault("anomaly_reason", None)
     return data
+
+
+MAPPING_PROMPT = """You are given the column headers and sample rows from a financial CSV export.
+The file may be from a bank, PayPal, Etsy, Stripe, Alibaba, a supplier, or any other source.
+
+Return a JSON object with these keys:
+
+{{
+  "date":             "<column name for the transaction date>",
+  "vendor":           "<column name for merchant/supplier/title — the human-readable label>",
+  "amount":           "<column name for the net/final dollar amount — prefer Net or Total over gross Amount>",
+  "type_col":         "<column whose values distinguish income from expense, or null if sign-based>",
+  "income_types":     ["<exact type_col values that mean money IN — e.g. Sale, Deposit, Payment Received>"],
+  "expense_types":    ["<exact type_col values that mean money OUT — e.g. Fee, GST, Shipping, Charge>"],
+  "exclude_types":    ["<exact type_col values that are noise/duplicates to skip — e.g. General Authorisation, General Credit Card Deposit, Pending>"],
+  "status_col":       "<column name for transaction status, or null>",
+  "completed_status": "<exact status value that means settled/completed, or null>",
+  "debit_col":        "<column for debit/withdrawal amounts if separate, else null>",
+  "credit_col":       "<column for credit/deposit amounts if separate, else null>",
+  "tax":              "<column for fee or tax amount, or null>",
+  "description":      "<secondary detail column, or null>",
+  "invoice_number":   "<column for order/invoice/transaction ID, or null>"
+}}
+
+Rules:
+- If income vs expense is determined by sign (negative = expense, positive = income), set type_col to null.
+- If there are separate debit and credit columns, set debit_col/credit_col and set amount to null.
+- Prefer Net or Total over a gross Amount column.
+- All string values in income_types, expense_types, exclude_types must be EXACT values from the sample rows.
+- For PayPal: exclude_types should include "General Authorisation" and "General Credit Card Deposit".
+- Return ONLY the JSON object, no explanation.
+
+CSV headers: {headers}
+
+Sample rows:
+{sample}"""
+
+
+async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
+    sample_lines = "\n".join(
+        ", ".join(f'{k}: "{v}"' for k, v in row.items() if v and v != "--")
+        for row in sample_rows[:5]
+    )
+    safe_headers = ", ".join(f'"{h}"' for h in headers).replace("{", "{{").replace("}", "}}")
+    safe_sample = sample_lines.replace("{", "{{").replace("}", "}}")
+    prompt = MAPPING_PROMPT.format(headers=safe_headers, sample=safe_sample)
+    raw = await _ollama_generate(prompt)
+    mapping = _parse_json(raw)
+    header_map = {h.lower().strip(): h for h in headers}
+    resolved = {}
+    for field, val in mapping.items():
+        if val and isinstance(val, str):
+            resolved[field] = header_map.get(val.lower().strip(), val)
+        else:
+            resolved[field] = val
+    return resolved
 
 
 async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:

@@ -1,17 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import VendorRule
+from backend.schemas import VendorRuleCreate
 from backend.services.vendor_rules import BUILT_IN_RULES, VALID_CATEGORIES
 
 router = APIRouter(prefix="/vendor-rules", tags=["vendor-rules"])
-
-
-class VendorRuleCreate(BaseModel):
-    vendor_pattern: str
-    category: str
 
 
 def _serialize(r: VendorRule) -> dict:

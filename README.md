@@ -125,10 +125,9 @@ Vector DB:
     AWS → Hosting
     Officeworks → Office Supplies
     ```
-    email extract: rules added in prompt
-    csv extract: column mapping prompt -> categorize prompt 
-    - ML classification
-    - user feedback learning
+    - email and pdf extract: rules added in prompt
+    - csv extract: column mapping prompt -> categorize prompt 
+
 2. csv exports from different source are very different 
 2. Extraction / deduplication: When extracting a new transaction from an email or PDF, use RAG to search for similar existing transactions first  
     ```

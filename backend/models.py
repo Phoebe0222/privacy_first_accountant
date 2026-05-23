@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime
+from sqlalchemy import Boolean, Column, Integer, String, Float, Text, DateTime
 from backend.database import Base
 
 
@@ -18,6 +18,8 @@ class Transaction(Base):
     description = Column(String, nullable=True)
     invoice_number = Column(String, nullable=True)
     raw_text = Column(Text, nullable=True)
+    anomaly = Column(Boolean, default=False, nullable=True)
+    anomaly_reason = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

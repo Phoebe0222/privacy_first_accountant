@@ -20,3 +20,16 @@ def get_db():
 def init_db():
     from backend.models import Transaction, EmailAccount, ChatMessage  # noqa: F401
     Base.metadata.create_all(bind=engine)
+    # Add new columns to existing tables without dropping data
+    with engine.connect() as conn:
+        for col, definition in [
+            ("anomaly", "BOOLEAN DEFAULT 0"),
+            ("anomaly_reason", "VARCHAR"),
+        ]:
+            try:
+                conn.execute(__import__("sqlalchemy").text(
+                    f"ALTER TABLE transactions ADD COLUMN {col} {definition}"
+                ))
+                conn.commit()
+            except Exception:
+                pass  # Column already exists

@@ -1,63 +1,6 @@
 import csv
 import io
 import re
-from backend.services.ai import OLLAMA_BASE, _parse_json, _ollama_generate
-
-MAPPING_PROMPT = """You are given the column headers and sample rows from a financial CSV export.
-The file may be from a bank, PayPal, Etsy, Stripe, Alibaba, a supplier, or any other source.
-
-Return a JSON object with these keys:
-
-{{
-  "date":             "<column name for the transaction date>",
-  "vendor":           "<column name for merchant/supplier/title — the human-readable label>",
-  "amount":           "<column name for the net/final dollar amount — prefer Net or Total over gross Amount>",
-  "type_col":         "<column whose values distinguish income from expense, or null if sign-based>",
-  "income_types":     ["<exact type_col values that mean money IN — e.g. Sale, Deposit, Payment Received>"],
-  "expense_types":    ["<exact type_col values that mean money OUT — e.g. Fee, GST, Shipping, Charge>"],
-  "exclude_types":    ["<exact type_col values that are noise/duplicates to skip — e.g. General Authorisation, General Credit Card Deposit, Pending>"],
-  "status_col":       "<column name for transaction status, or null>",
-  "completed_status": "<exact status value that means settled/completed, or null>",
-  "debit_col":        "<column for debit/withdrawal amounts if separate, else null>",
-  "credit_col":       "<column for credit/deposit amounts if separate, else null>",
-  "tax":              "<column for fee or tax amount, or null>",
-  "description":      "<secondary detail column, or null>",
-  "invoice_number":   "<column for order/invoice/transaction ID, or null>"
-}}
-
-Rules:
-- If income vs expense is determined by sign (negative = expense, positive = income), set type_col to null.
-- If there are separate debit and credit columns, set debit_col/credit_col and set amount to null.
-- Prefer Net or Total over a gross Amount column.
-- All string values in income_types, expense_types, exclude_types must be EXACT values from the sample rows.
-- For PayPal: exclude_types should include "General Authorisation" and "General Credit Card Deposit".
-- Return ONLY the JSON object, no explanation.
-
-CSV headers: {headers}
-
-Sample rows:
-{sample}"""
-
-
-async def map_columns(headers: list[str], sample_rows: list[dict]) -> dict:
-    sample_lines = "\n".join(
-        ", ".join(f'{k}: "{v}"' for k, v in row.items() if v and v != "--")
-        for row in sample_rows[:5]
-    )
-    safe_headers = ", ".join(f'"{h}"' for h in headers).replace("{", "{{").replace("}", "}}")
-    safe_sample = sample_lines.replace("{", "{{").replace("}", "}}")
-    prompt = MAPPING_PROMPT.format(headers=safe_headers, sample=safe_sample)
-    raw = await _ollama_generate(prompt)
-    mapping = _parse_json(raw)
-    # Resolve mapped column names case-insensitively against actual headers
-    header_map = {h.lower().strip(): h for h in headers}
-    resolved = {}
-    for field, val in mapping.items():
-        if val and isinstance(val, str):
-            resolved[field] = header_map.get(val.lower().strip(), val)
-        else:
-            resolved[field] = val
-    return resolved
 
 
 def parse_csv(file_bytes: bytes, filename: str = "") -> tuple[list[str], list[dict]]:

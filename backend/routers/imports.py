@@ -8,12 +8,12 @@ log = logging.getLogger(__name__)
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal, get_db
+from backend.schemas import EmailAccountCreate
 from backend.models import EmailAccount, Transaction
-from backend.services.ai import extract_transaction, extract_from_image, categorize_vendors
+from backend.services.ai import extract_transaction, extract_from_image, categorize_vendors, map_csv_columns
 from backend.services import rag
 from backend.services.email_ingestion import fetch_emails
 from backend.services.pdf_ingestion import (
@@ -22,7 +22,7 @@ from backend.services.pdf_ingestion import (
     is_pdf_file,
     normalise_image,
 )
-from backend.services.csv_ingestion import map_columns, parse_csv, apply_mapping  # noqa: F401
+from backend.services.csv_ingestion import parse_csv, apply_mapping
 from backend.services.vendor_rules import BUILT_IN_RULES  # noqa: F401 (used via _load_category_rules)
 from backend.models import VendorRule
 
@@ -31,6 +31,28 @@ _IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp
 router = APIRouter(prefix="/import", tags=["import"])
 
 _jobs: dict[str, dict] = {}
+
+
+
+_FINANCIAL_RE = re.compile(
+    r"[\$£€]|\binvoice\b|\bbill\b|\breceipt\b|\bpayment\b|\bcharge\b"
+    r"|\bsubscription\b|amount due|due date|total due"
+    r"|order confirmation|\bstatement\b|\bpayout\b"
+    r"|\brefund\b|\bdeposit\b",
+    re.IGNORECASE,
+)
+_NON_FINANCIAL_RE = re.compile(
+    r"\bdispatched\b|\bshipped\b|\btracking\b|\bdelivered\b"
+    r"|\blogistics\b|\bparcel\b|\bshipment\b"
+    r"|out for delivery|in transit|is on its way|has left|cleared customs",
+    re.IGNORECASE,
+)
+_IGNORED_SENDERS_RE = re.compile(
+    r"@(?:[\w.-]+\.)?glassdoor\.com"
+    r"|@(?:[\w.-]+\.)?indeed\.com"
+    r"|@(?:[\w.-]+\.)?linkedin\.com",
+    re.IGNORECASE,
+)
 
 
 def _load_category_rules(db) -> list[tuple[str, str]]:
@@ -43,15 +65,93 @@ def _load_category_rules(db) -> list[tuple[str, str]]:
     )
     return user_pairs + BUILT_IN_RULES
 
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
-class EmailAccountCreate(BaseModel):
-    name: str
-    email: str
-    imap_host: str
-    imap_port: int = 993
-    username: str
-    password: str
 
+async def _index_transactions(transaction_ids: list[int]):
+    db = SessionLocal()
+    try:
+        for tid in transaction_ids:
+            t = db.get(Transaction, tid)
+            if t:
+                try:
+                    await rag.index_transaction(t)
+                except Exception:
+                    pass
+    finally:
+        db.close()
+
+
+def _looks_financial(em: dict) -> bool:
+    sender = em.get("from") or ""
+    subject = em.get("subject") or ""
+    if _IGNORED_SENDERS_RE.search(sender):
+        log.info("SKIP (ignored sender) | %s | %s", sender, subject)
+        return False
+    text = (em.get("raw_text") or "")[:2000]
+    combined = subject + " " + text
+    if _NON_FINANCIAL_RE.search(subject):
+        log.info("SKIP (non-financial subject) | %s | %s", sender, subject)
+        return False
+    if not _FINANCIAL_RE.search(combined):
+        log.info("SKIP (no financial keywords) | %s | %s", sender, subject)
+        return False
+    log.info("PASS | %s | %s", sender, subject)
+    return True
+
+
+async def _extract_email(
+    em: dict,
+    sem: asyncio.Semaphore,
+    category_rules: list,
+) -> tuple[dict, dict | None, str | None]:
+    async with sem:
+        try:
+            text = em.get("raw_text") or ""
+            for att in em.get("attachments", []):
+                if att["mime_type"] == "application/pdf":
+                    pdf_text = extract_text_from_pdf(att["bytes"])
+                    if pdf_text.strip():
+                        text = pdf_text
+                        break
+                elif att["mime_type"] in _IMAGE_MIMES:
+                    image_text = await extract_from_image(normalise_image(att["bytes"]))
+                    if image_text.strip():
+                        text = image_text
+                        break
+            # TODO: make this into a function that can be used for other sources too, e.g. file uploads, with better error handling and logging
+            subject = em.get("subject", "").replace("\n", " ")
+            log.info("AI extracting | %s | %s", em.get("from", ""), subject)
+            t = time.monotonic()
+            try:
+                similar = await rag.search(f"{subject} {text[:300]}", n_results=5)
+            except Exception:
+                similar = []
+            result = await extract_transaction(text, category_rules=category_rules, similar_transactions=similar)
+            log.info("AI done %.1fs | skip=%s vendor=%s amount=%s type=%s | %s",
+                     time.monotonic() - t, result.get("skip"), result.get("vendor"),
+                     result.get("amount"), result.get("type"), subject)
+            return em, result, None
+        except Exception as e:
+            log.warning("AI error | %s\n  → %s: %s", em.get("subject", "").replace("\n", " "), type(e).__name__, e)
+            return em, None, str(e)
+
+
+def _serialize_account(a: EmailAccount) -> dict:
+    return {
+        "id": a.id,
+        "name": a.name,
+        "email": a.email,
+        "imap_host": a.imap_host,
+        "imap_port": a.imap_port,
+        "username": a.username,
+        "last_synced": a.last_synced.isoformat() if a.last_synced else None,
+    }
 
 # ── Email accounts ──────────────────────────────────────────────────────────
 
@@ -82,7 +182,7 @@ def delete_email_account(account_id: int, db: Session = Depends(get_db)):
     db.commit()
     return {"ok": True}
 
-
+# ── Email sync ─────────────────────────────────────────────────────────────
 @router.post("/email-accounts/{account_id}/sync")
 async def sync_email_account(
     account_id: int,
@@ -93,15 +193,17 @@ async def sync_email_account(
     account = db.get(EmailAccount, account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
+    
+    # TODO: add option to sync for a specific date range, not just "last N days", max is one year
 
-    if reimport:
+    if reimport: # re-import option: delete existing transactions from this account before syncing
         db.query(Transaction).filter(Transaction.source == "email").delete()
         db.commit()
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running", "added": 0, "skipped": 0, "errors": []}
 
-    asyncio.create_task(_run_sync(
+    asyncio.create_task(_run_email_sync(
         job_id=job_id,
         account_id=account_id,
         imap_host=account.imap_host,
@@ -114,15 +216,7 @@ async def sync_email_account(
     return {"job_id": job_id, "status": "running"}
 
 
-@router.get("/jobs/{job_id}")
-def get_job(job_id: str):
-    job = _jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job
-
-
-async def _run_sync(
+async def _run_email_sync(
     job_id: str,
     account_id: int,
     imap_host: str,
@@ -165,35 +259,8 @@ async def _run_sync(
         category_rules = _load_category_rules(db)
         sem = asyncio.Semaphore(3)
 
-        async def _extract(em: dict):
-            async with sem:
-                try:
-                    text = em.get("raw_text") or ""
-                    for att in em.get("attachments", []):
-                        if att["mime_type"] == "application/pdf":
-                            pdf_text = extract_text_from_pdf(att["bytes"])
-                            if pdf_text.strip():
-                                text = pdf_text
-                                break
-                        elif att["mime_type"] in _IMAGE_MIMES:
-                            image_text = await extract_from_image(normalise_image(att["bytes"]))
-                            if image_text.strip():
-                                text = image_text
-                                break
-                    subject = em.get("subject", "").replace("\n", " ")
-                    log.info("AI extracting | %s | %s", em.get("from", ""), subject)
-                    t = time.monotonic()
-                    result = await extract_transaction(text, category_rules=category_rules)
-                    log.info("AI done %.1fs | skip=%s vendor=%s amount=%s type=%s | %s",
-                             time.monotonic() - t, result.get("skip"), result.get("vendor"),
-                             result.get("amount"), result.get("type"), subject)
-                    return em, result, None
-                except Exception as e:
-                    log.warning("AI error | %s\n  → %s: %s", em.get("subject", "").replace("\n", " "), type(e).__name__, e)
-                    return em, None, str(e)
-
         t2 = time.monotonic()
-        results = await asyncio.gather(*[_extract(em) for em in financial_emails])
+        results = await asyncio.gather(*[_extract_email(em, sem, category_rules) for em in financial_emails])
         log.info("TIMING | all AI calls: %.1fs  (%.1fs/email avg)", time.monotonic() - t2, (time.monotonic() - t2) / max(len(financial_emails), 1))
 
         errors = []
@@ -211,6 +278,9 @@ async def _run_sync(
                 log.info("AI SKIP (zero amount) | %s", em.get("subject", "").replace("\n", " "))
                 skipped_count += 1
                 continue
+            is_anomaly = bool(data.get("anomaly"))
+            if is_anomaly:
+                log.warning("ANOMALY | %s | %s | reason: %s", data.get("vendor"), data.get("amount"), data.get("anomaly_reason"))
             t = Transaction(
                 date=data.get("date") or em["date"][:10],
                 vendor=data.get("vendor") or em["from"],
@@ -223,6 +293,8 @@ async def _run_sync(
                 description=data.get("description") or em["subject"],
                 invoice_number=data.get("invoice_number"),
                 raw_text=em["raw_text"],
+                anomaly=is_anomaly,
+                anomaly_reason=data.get("anomaly_reason"),
             )
             log.info("SAVED | %s | %s | %s $%s", t.type, t.vendor, t.date, t.amount)
             db.add(t)
@@ -235,14 +307,11 @@ async def _run_sync(
 
         for t in added_transactions:
             db.refresh(t)
-            try:
-                await rag.index_transaction(t)
-            except Exception:
-                pass
 
         added = len(added_transactions)
         pre_filtered = len(new_emails) - len(financial_emails)
         log.info("TIMING | total sync: %.1fs  added=%d", time.monotonic() - t0, added)
+        transaction_ids = [t.id for t in added_transactions]
         _jobs[job_id] = {
             "status": "done",
             "added": added,
@@ -250,24 +319,12 @@ async def _run_sync(
             "not_financial": skipped_count + pre_filtered,
             "errors": errors,
         }
+        asyncio.create_task(_index_transactions(transaction_ids))
     except Exception as e:
         _jobs[job_id] = {"status": "failed", "error": str(e)}
     finally:
         db.close()
 
-
-async def _index_transactions(transaction_ids: list[int]):
-    db = SessionLocal()
-    try:
-        for tid in transaction_ids:
-            t = db.get(Transaction, tid)
-            if t:
-                try:
-                    await rag.index_transaction(t)
-                except Exception:
-                    pass
-    finally:
-        db.close()
 
 
 # ── File upload ──────────────────────────────────────────────────────────────
@@ -291,7 +348,11 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         raise HTTPException(status_code=422, detail="Could not extract text from file.")
 
     category_rules = _load_category_rules(db)
-    data = await extract_transaction(raw_text, category_rules=category_rules)
+    try:
+        similar = await rag.search(raw_text[:300], n_results=5)
+    except Exception:
+        similar = []
+    data = await extract_transaction(raw_text, category_rules=category_rules, similar_transactions=similar)
     if not float(data.get("amount") or 0):
         raise HTTPException(status_code=422, detail="Could not extract a non-zero amount from file.")
     t = Transaction(
@@ -325,7 +386,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         }
     }
 
-
+# --- csv -----------------------
 @router.post("/csv")
 async def upload_csv(file: UploadFile = File(...)):
     file_bytes = await file.read()
@@ -346,7 +407,7 @@ async def upload_csv(file: UploadFile = File(...)):
 
 async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
     try:
-        mapping = await map_columns(headers, rows[:5])
+        mapping = await map_csv_columns(headers, rows[:5])
         transactions = apply_mapping(rows, mapping)
         if not transactions:
             _jobs[job_id] = {"status": "failed", "error": "No valid transactions found in file."}
@@ -386,54 +447,3 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
         asyncio.create_task(_index_transactions(transaction_ids))
     except Exception as e:
         _jobs[job_id] = {"status": "failed", "error": str(e)}
-
-
-_FINANCIAL_RE = re.compile(
-    r"[\$£€]|\binvoice\b|\bbill\b|\breceipt\b|\bpayment\b|\bcharge\b"
-    r"|\bsubscription\b|amount due|due date|total due"
-    r"|order confirmation|\bstatement\b|\bpayout\b"
-    r"|\brefund\b|\bdeposit\b",
-    re.IGNORECASE,
-)
-_NON_FINANCIAL_RE = re.compile(
-    r"\bdispatched\b|\bshipped\b|\btracking\b|\bdelivered\b"
-    r"|\blogistics\b|\bparcel\b|\bshipment\b"
-    r"|out for delivery|in transit|is on its way|has left|cleared customs",
-    re.IGNORECASE,
-)
-_IGNORED_SENDERS_RE = re.compile(
-    r"@(?:[\w.-]+\.)?glassdoor\.com"
-    r"|@(?:[\w.-]+\.)?indeed\.com"
-    r"|@(?:[\w.-]+\.)?linkedin\.com",
-    re.IGNORECASE,
-)
-
-
-def _looks_financial(em: dict) -> bool:
-    sender = em.get("from") or ""
-    subject = em.get("subject") or ""
-    if _IGNORED_SENDERS_RE.search(sender):
-        log.info("SKIP (ignored sender) | %s | %s", sender, subject)
-        return False
-    text = (em.get("raw_text") or "")[:2000]
-    combined = subject + " " + text
-    if _NON_FINANCIAL_RE.search(subject):
-        log.info("SKIP (non-financial subject) | %s | %s", sender, subject)
-        return False
-    if not _FINANCIAL_RE.search(combined):
-        log.info("SKIP (no financial keywords) | %s | %s", sender, subject)
-        return False
-    log.info("PASS | %s | %s", sender, subject)
-    return True
-
-
-def _serialize_account(a: EmailAccount) -> dict:
-    return {
-        "id": a.id,
-        "name": a.name,
-        "email": a.email,
-        "imap_host": a.imap_host,
-        "imap_port": a.imap_port,
-        "username": a.username,
-        "last_synced": a.last_synced.isoformat() if a.last_synced else None,
-    }
