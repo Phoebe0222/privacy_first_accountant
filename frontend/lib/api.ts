@@ -75,18 +75,17 @@ export const api = {
   deleteEmailAccount: (id: number) =>
     req<{ ok: boolean }>(`/import/email-accounts/${id}`, { method: "DELETE" }),
 
-  syncEmailAccount: async (id: number, daysBack = 30, reimport = false) => {
-    const { job_id } = await req<{ job_id: string }>(
-      `/import/email-accounts/${id}/sync?days_back=${daysBack}&reimport=${reimport}`,
-      { method: "POST" }
-    );
+  startSync: (id: number, reimport = false) =>
+    req<{ job_id: string }>(`/import/email-accounts/${id}/sync?reimport=${reimport}`, { method: "POST" }),
+
+  pollJob: async (jobId: string): Promise<{ added: number; skipped: number }> => {
     while (true) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const job = await req<{ status: string; added?: number; skipped?: number; errors?: unknown[] }>(
-        `/import/jobs/${job_id}`
+      const job = await req<{ status: string; added?: number; skipped?: number; error?: string }>(
+        `/import/jobs/${jobId}`
       );
-      if (job.status === "done") return job as { added: number; skipped: number; errors: unknown[] };
-      if (job.status === "failed") throw new Error((job as { error?: string }).error ?? "Sync failed");
+      if (job.status === "done") return { added: job.added ?? 0, skipped: job.skipped ?? 0 };
+      if (job.status === "failed") throw new Error(job.error ?? "Sync failed");
+      await new Promise((r) => setTimeout(r, 2000));
     }
   },
 
@@ -102,18 +101,8 @@ export const api = {
   uploadCsv: async (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const { job_id } = await req<{ job_id: string }>("/import/csv", {
-      method: "POST",
-      body: form,
-    });
-    while (true) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const job = await req<{ status: string; added?: number; skipped?: number; error?: string }>(
-        `/import/jobs/${job_id}`
-      );
-      if (job.status === "done") return { added: job.added ?? 0, skipped: job.skipped ?? 0 };
-      if (job.status === "failed") throw new Error(job.error ?? "CSV import failed");
-    }
+    const { job_id } = await req<{ job_id: string }>("/import/csv", { method: "POST", body: form });
+    return api.pollJob(job_id);
   },
 
   // ── Chat ────────────────────────────────────────────────────────────────

@@ -20,6 +20,8 @@ export default function TransactionsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "" });
 
   function load() {
     setLoading(true);
@@ -68,6 +70,22 @@ export default function TransactionsPage() {
 
   async function handleTypeChange(id: number, newType: "income" | "expense") {
     await api.updateTransaction(id, { type: newType });
+    load();
+  }
+
+  function startEdit(t: Transaction) {
+    setEditingId(t.id);
+    setEditForm({ vendor: t.vendor, category: t.category, amount: String(t.amount), tax: String(t.tax) });
+  }
+
+  async function saveEdit(id: number) {
+    await api.updateTransaction(id, {
+      vendor: editForm.vendor,
+      category: editForm.category,
+      amount: parseFloat(editForm.amount) || 0,
+      tax: parseFloat(editForm.tax) || 0,
+    });
+    setEditingId(null);
     load();
   }
 
@@ -131,20 +149,14 @@ export default function TransactionsPage() {
       )}
 
       <div className="flex gap-4">
-        <select
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
-        >
+        <select value={type} onChange={(e) => setType(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
           <option value="">All types</option>
           <option value="income">Income</option>
           <option value="expense">Expense</option>
         </select>
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white"
-        >
+        <select value={category} onChange={(e) => setCategory(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
           ))}
@@ -175,33 +187,98 @@ export default function TransactionsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {sorted.map((t) => (
-                <tr key={t.id} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 text-gray-600">{t.date}</td>
-                  <td className="px-4 py-3 font-medium text-gray-800">{t.vendor}</td>
-                  <td className="px-4 py-3 capitalize text-gray-500">{t.category}</td>
-                  <td className="px-4 py-3">
-                    <select
-                      value={t.type}
-                      onChange={(e) => handleTypeChange(t.id, e.target.value as "income" | "expense")}
-                      className={`text-xs font-medium px-2 py-0.5 rounded border-0 cursor-pointer ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
-                    >
-                      <option value="income">income</option>
-                      <option value="expense">expense</option>
-                    </select>
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 capitalize">{t.source}</td>
-                  <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
-                    {fmt(t.amount)}
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-400">{t.tax ? fmt(t.tax) : "—"}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button onClick={() => handleDelete(t.id)} className="text-gray-300 hover:text-red-500 transition-colors text-xs">
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {sorted.map((t) => {
+                const editing = editingId === t.id;
+                return (
+                  <tr key={t.id} className={`transition-colors ${editing ? "bg-blue-50" : "hover:bg-gray-50"}`}>
+                    <td className="px-4 py-3 text-gray-600">{t.date}</td>
+
+                    <td className="px-4 py-3">
+                      {editing ? (
+                        <input
+                          value={editForm.vendor}
+                          onChange={(e) => setEditForm({ ...editForm, vendor: e.target.value })}
+                          className="w-full border border-blue-300 rounded px-2 py-1 text-sm font-medium"
+                          autoFocus
+                        />
+                      ) : (
+                        <span className="font-medium text-gray-800">{t.vendor}</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {editing ? (
+                        <select
+                          value={editForm.category}
+                          onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                          className="w-full border border-blue-300 rounded px-2 py-1 text-sm"
+                        >
+                          {FORM_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <span className="capitalize text-gray-500">{t.category}</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <select
+                        value={t.type}
+                        onChange={(e) => handleTypeChange(t.id, e.target.value as "income" | "expense")}
+                        className={`text-xs font-medium px-2 py-0.5 rounded border-0 cursor-pointer ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
+                      >
+                        <option value="income">income</option>
+                        <option value="expense">expense</option>
+                      </select>
+                    </td>
+
+                    <td className="px-4 py-3 text-gray-400 capitalize">{t.source}</td>
+
+                    <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
+                      {editing ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editForm.amount}
+                          onChange={(e) => setEditForm({ ...editForm, amount: e.target.value })}
+                          className="w-24 border border-blue-300 rounded px-2 py-1 text-sm text-right"
+                        />
+                      ) : (
+                        fmt(t.amount)
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3 text-right text-gray-400">
+                      {editing ? (
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={editForm.tax}
+                          onChange={(e) => setEditForm({ ...editForm, tax: e.target.value })}
+                          className="w-20 border border-blue-300 rounded px-2 py-1 text-sm text-right"
+                        />
+                      ) : (
+                        t.tax ? fmt(t.tax) : "—"
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      {editing ? (
+                        <span className="flex justify-end gap-2">
+                          <button onClick={() => saveEdit(t.id)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Save</button>
+                          <button onClick={() => setEditingId(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                        </span>
+                      ) : (
+                        <span className="flex justify-end gap-3">
+                          <button onClick={() => startEdit(t)} className="text-gray-300 hover:text-blue-500 transition-colors text-xs">Edit</button>
+                          <button onClick={() => handleDelete(t.id)} className="text-gray-300 hover:text-red-500 transition-colors text-xs">Delete</button>
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

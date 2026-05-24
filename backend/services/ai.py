@@ -89,6 +89,8 @@ def _format_similar_section(similar: list[str] | None) -> str:
     return (
         "Past similar transactions from your records (use for categorisation and anomaly detection):\n"
         + entries
+        + "\n\nCategorise this transaction based on the above rules and similar transactions. "
+        "If it doesn't match any patterns or past transactions, categorise based on your best understanding of the vendor and description.\n\n"
         + "\n\nIf the current amount differs significantly (more than 2x) from past amounts for the same vendor, "
         "set anomaly to true and explain briefly in anomaly_reason.\n\n"
     )
@@ -138,7 +140,7 @@ Text:
 {text}"""
 
 
-async def extract_transaction(
+async def extract_from_text(
     text: str,
     category_rules: list[tuple[str, str]] | None = None,
     similar_transactions: list[str] | None = None,

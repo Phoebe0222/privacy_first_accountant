@@ -5,7 +5,7 @@ import time
 import uuid
 
 log = logging.getLogger(__name__)
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -13,9 +13,9 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal, get_db
 from backend.schemas import EmailAccountCreate
 from backend.models import EmailAccount, Transaction
-from backend.services.ai import extract_transaction, extract_from_image, categorize_vendors, map_csv_columns
+from backend.services.ai import extract_from_text, extract_from_image, categorize_vendors, map_csv_columns
 from backend.services import rag
-from backend.services.email_ingestion import fetch_emails
+from backend.services.email_ingestion import fetch_email_headers, fetch_email_bodies
 from backend.services.pdf_ingestion import (
     extract_text_from_pdf,
     is_image_file,
@@ -28,11 +28,11 @@ from backend.models import VendorRule
 
 _IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
 
+SYNC_COOLDOWN_MINUTES = 15
+
 router = APIRouter(prefix="/import", tags=["import"])
 
 _jobs: dict[str, dict] = {}
-
-
 
 _FINANCIAL_RE = re.compile(
     r"[\$£€]|\binvoice\b|\bbill\b|\breceipt\b|\bpayment\b|\bcharge\b"
@@ -54,6 +54,13 @@ _IGNORED_SENDERS_RE = re.compile(
     re.IGNORECASE,
 )
 
+@router.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
 
 def _load_category_rules(db) -> list[tuple[str, str]]:
     """Merge user-defined rules (highest priority) with built-in rules, longest-first."""
@@ -65,12 +72,53 @@ def _load_category_rules(db) -> list[tuple[str, str]]:
     )
     return user_pairs + BUILT_IN_RULES
 
-@router.get("/jobs/{job_id}")
-def get_job(job_id: str):
-    job = _jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job
+
+async def _run_ai_extraction(
+    text: str,
+    label: str,
+    category_rules: list,
+) -> dict:
+    log.info("AI extracting | %s", label)
+    t = time.monotonic()
+    try:
+        similar = await rag.search(f"{label} {text[:300]}", n_results=5)
+    except Exception:
+        similar = []
+    result = await extract_from_text(text, category_rules=category_rules, similar_transactions=similar)
+    log.info("AI done %.1fs | skip=%s vendor=%s amount=%s type=%s | %s",
+             time.monotonic() - t, result.get("skip"), result.get("vendor"),
+             result.get("amount"), result.get("type"), label)
+    return result
+
+
+def _build_transaction(
+    data: dict,
+    source: str,
+    source_ref: str | None,
+    raw_text: str,
+    fallback_date: str | None = None,
+    fallback_vendor: str | None = None,
+    fallback_description: str | None = None,
+) -> Transaction:
+    is_anomaly = bool(data.get("anomaly"))
+    if is_anomaly:
+        log.warning("ANOMALY | %s | %s | reason: %s", data.get("vendor"), data.get("amount"), data.get("anomaly_reason"))
+    return Transaction(
+        date=data.get("date") or fallback_date,
+        vendor=data.get("vendor") or fallback_vendor or "",
+        amount=float(data.get("amount") or 0),
+        tax=float(data.get("tax") or 0),
+        category=data.get("category") or "other",
+        type=data.get("type") or "expense",
+        source=source,
+        source_ref=source_ref,
+        description=data.get("description") or fallback_description,
+        invoice_number=data.get("invoice_number"),
+        raw_text=raw_text,
+        anomaly=is_anomaly,
+        anomaly_reason=data.get("anomaly_reason"),
+    )
+
 
 
 async def _index_transactions(transaction_ids: list[int]):
@@ -87,61 +135,7 @@ async def _index_transactions(transaction_ids: list[int]):
         db.close()
 
 
-def _looks_financial(em: dict) -> bool:
-    sender = em.get("from") or ""
-    subject = em.get("subject") or ""
-    if _IGNORED_SENDERS_RE.search(sender):
-        log.info("SKIP (ignored sender) | %s | %s", sender, subject)
-        return False
-    text = (em.get("raw_text") or "")[:2000]
-    combined = subject + " " + text
-    if _NON_FINANCIAL_RE.search(subject):
-        log.info("SKIP (non-financial subject) | %s | %s", sender, subject)
-        return False
-    if not _FINANCIAL_RE.search(combined):
-        log.info("SKIP (no financial keywords) | %s | %s", sender, subject)
-        return False
-    log.info("PASS | %s | %s", sender, subject)
-    return True
-
-
-async def _extract_email(
-    em: dict,
-    sem: asyncio.Semaphore,
-    category_rules: list,
-) -> tuple[dict, dict | None, str | None]:
-    async with sem:
-        try:
-            text = em.get("raw_text") or ""
-            for att in em.get("attachments", []):
-                if att["mime_type"] == "application/pdf":
-                    pdf_text = extract_text_from_pdf(att["bytes"])
-                    if pdf_text.strip():
-                        text = pdf_text
-                        break
-                elif att["mime_type"] in _IMAGE_MIMES:
-                    image_text = await extract_from_image(normalise_image(att["bytes"]))
-                    if image_text.strip():
-                        text = image_text
-                        break
-            # TODO: make this into a function that can be used for other sources too, e.g. file uploads, with better error handling and logging
-            subject = em.get("subject", "").replace("\n", " ")
-            log.info("AI extracting | %s | %s", em.get("from", ""), subject)
-            t = time.monotonic()
-            try:
-                similar = await rag.search(f"{subject} {text[:300]}", n_results=5)
-            except Exception:
-                similar = []
-            result = await extract_transaction(text, category_rules=category_rules, similar_transactions=similar)
-            log.info("AI done %.1fs | skip=%s vendor=%s amount=%s type=%s | %s",
-                     time.monotonic() - t, result.get("skip"), result.get("vendor"),
-                     result.get("amount"), result.get("type"), subject)
-            return em, result, None
-        except Exception as e:
-            log.warning("AI error | %s\n  → %s: %s", em.get("subject", "").replace("\n", " "), type(e).__name__, e)
-            return em, None, str(e)
-
-
+# ── Email accounts ──────────────────────────────────────────────────────────
 def _serialize_account(a: EmailAccount) -> dict:
     return {
         "id": a.id,
@@ -152,8 +146,6 @@ def _serialize_account(a: EmailAccount) -> dict:
         "username": a.username,
         "last_synced": a.last_synced.isoformat() if a.last_synced else None,
     }
-
-# ── Email accounts ──────────────────────────────────────────────────────────
 
 @router.get("/email-accounts")
 def list_email_accounts(db: Session = Depends(get_db)):
@@ -183,23 +175,33 @@ def delete_email_account(account_id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 # ── Email sync ─────────────────────────────────────────────────────────────
+def aus_fy_start(today: date | None = None) -> date:
+    """Return 1 July of the current Australian financial year."""
+    d = today or date.today()
+    return date(d.year, 7, 1) if d.month >= 7 else date(d.year - 1, 7, 1)
+
 @router.post("/email-accounts/{account_id}/sync")
 async def sync_email_account(
     account_id: int,
-    days_back: int = 30,
     reimport: bool = False,
     db: Session = Depends(get_db),
 ):
     account = db.get(EmailAccount, account_id)
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-    
-    # TODO: add option to sync for a specific date range, not just "last N days",
-    # for example, synv from beginning of the financial year
 
-    if reimport: # re-import option: delete existing transactions from this account before syncing
+    if not reimport and account.last_synced:
+        elapsed = datetime.now(timezone.utc).replace(tzinfo=None) - account.last_synced
+        if elapsed < timedelta(minutes=SYNC_COOLDOWN_MINUTES):
+            remaining = int((timedelta(minutes=SYNC_COOLDOWN_MINUTES) - elapsed).total_seconds())
+            raise HTTPException(status_code=429, detail=f"Sync cooldown active — try again in {remaining}s")
+
+    if reimport:
         db.query(Transaction).filter(Transaction.source == "email").delete()
         db.commit()
+
+    since = aus_fy_start() if (reimport or not account.last_synced) else account.last_synced.date()
+    days_back = (date.today() - since).days + 1
 
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running", "added": 0, "skipped": 0, "errors": []}
@@ -214,7 +216,7 @@ async def sync_email_account(
         days_back=days_back,
     ))
 
-    return {"job_id": job_id, "status": "running"}
+    return {"job_id": job_id, "status": "running", "days_back": days_back}
 
 
 async def _run_email_sync(
@@ -226,36 +228,50 @@ async def _run_email_sync(
     password: str,
     days_back: int,
 ):
+    loop = asyncio.get_event_loop()
+    imap_kwargs = dict(host=imap_host, port=imap_port, username=username, password=password)
+
+    # Stage 1: fetch headers only
     t0 = time.monotonic()
     try:
-        loop = asyncio.get_event_loop()
-        emails = await loop.run_in_executor(
-            None,
-            lambda: fetch_emails(
-                host=imap_host,
-                port=imap_port,
-                username=username,
-                password=password,
-                days_back=days_back,
-            ),
+        all_headers = await loop.run_in_executor(
+            None, lambda: fetch_email_headers(**imap_kwargs, days_back=days_back)
         )
     except Exception as e:
         _jobs[job_id] = {"status": "failed", "error": str(e)}
         return
-    log.info("TIMING | IMAP fetch: %.1fs", time.monotonic() - t0)
+    log.info("TIMING | IMAP headers: %.1fs | fetched=%d", time.monotonic() - t0, len(all_headers))
 
     db = SessionLocal()
     try:
-        t1 = time.monotonic()
-        new_emails = [
-            em for em in emails
-            if not db.query(Transaction).filter(Transaction.source_ref == em["uid"]).first()
-        ]
-        log.info("TIMING | dedup check: %.1fs", time.monotonic() - t1)
-        log.info("EMAIL SYNC | fetched=%d  new=%d  already_imported=%d", len(emails), len(new_emails), len(emails) - len(new_emails))
+        # Stage 2: subject-level financial filter
+        candidate_headers = [h for h in all_headers if _looks_financial(h)]
+        log.info("EMAIL SYNC | subject-filter passed=%d  dropped=%d", len(candidate_headers), len(all_headers) - len(candidate_headers))
 
-        financial_emails = [em for em in new_emails if _looks_financial(em)]
-        log.info("EMAIL SYNC | pre-filter passed=%d  dropped=%d", len(financial_emails), len(new_emails) - len(financial_emails))
+        # Stage 3: dedup — skip UIDs already in DB
+        t1 = time.monotonic()
+        new_headers = [
+            h for h in candidate_headers
+            if not db.query(Transaction).filter(
+                Transaction.source_ref == f"{account_id}:{h['uid']}"
+            ).first()
+        ]
+        log.info("TIMING | dedup check: %.1fs | new=%d  already_imported=%d", time.monotonic() - t1, len(new_headers), len(candidate_headers) - len(new_headers))
+
+        # Stage 4: fetch full bodies only for new financial emails
+        t2 = time.monotonic()
+        try:
+            emails = await loop.run_in_executor(
+                None, lambda: fetch_email_bodies(**imap_kwargs, headers=new_headers)
+            )
+        except Exception as e:
+            _jobs[job_id] = {"status": "failed", "error": str(e)}
+            return
+        log.info("TIMING | IMAP bodies: %.1fs", time.monotonic() - t2)
+
+        # Stage 5: full financial filter now that we have body content
+        financial_emails = [em for em in emails if _looks_financial(em)]
+        log.info("EMAIL SYNC | body-filter passed=%d  dropped=%d", len(financial_emails), len(emails) - len(financial_emails))
 
         category_rules = _load_category_rules(db)
         sem = asyncio.Semaphore(3)
@@ -269,7 +285,7 @@ async def _run_email_sync(
         added_transactions: list[Transaction] = []
         for em, data, err in results:
             if err:
-                errors.append({"uid": em["uid"], "error": err})
+                errors.append({"uid": f"{account_id}:{em['uid']}", "error": err})
                 continue
             if not data or data.get("skip"):
                 log.info("AI SKIP | %s", em.get("subject", ""))
@@ -279,23 +295,14 @@ async def _run_email_sync(
                 log.info("AI SKIP (zero amount) | %s", em.get("subject", "").replace("\n", " "))
                 skipped_count += 1
                 continue
-            is_anomaly = bool(data.get("anomaly"))
-            if is_anomaly:
-                log.warning("ANOMALY | %s | %s | reason: %s", data.get("vendor"), data.get("amount"), data.get("anomaly_reason"))
-            t = Transaction(
-                date=data.get("date") or em["date"][:10],
-                vendor=data.get("vendor") or em["from"],
-                amount=float(data.get("amount") or 0),
-                tax=float(data.get("tax") or 0),
-                category=data.get("category") or "other",
-                type=data.get("type") or "expense",
+            t = _build_transaction(
+                data,
                 source="email",
-                source_ref=em["uid"],
-                description=data.get("description") or em["subject"],
-                invoice_number=data.get("invoice_number"),
+                source_ref=f"{account_id}:{em['uid']}",
                 raw_text=em["raw_text"],
-                anomaly=is_anomaly,
-                anomaly_reason=data.get("anomaly_reason"),
+                fallback_date=em["date"][:10],
+                fallback_vendor=em["from"],
+                fallback_description=em["subject"],
             )
             log.info("SAVED | %s | %s | %s $%s", t.type, t.vendor, t.date, t.amount)
             db.add(t)
@@ -303,14 +310,14 @@ async def _run_email_sync(
 
         account = db.get(EmailAccount, account_id)
         if account:
-            account.last_synced = datetime.utcnow()
+            account.last_synced = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
 
         for t in added_transactions:
             db.refresh(t)
 
         added = len(added_transactions)
-        pre_filtered = len(new_emails) - len(financial_emails)
+        pre_filtered = len(emails) - len(financial_emails)
         log.info("TIMING | total sync: %.1fs  added=%d", time.monotonic() - t0, added)
         transaction_ids = [t.id for t in added_transactions]
         _jobs[job_id] = {
@@ -327,6 +334,46 @@ async def _run_email_sync(
         db.close()
 
 
+async def _extract_email(
+    em: dict,
+    sem: asyncio.Semaphore,
+    category_rules: list,
+) -> tuple[dict, dict | None, str | None]:
+    async with sem:
+        try:
+            text = em.get("raw_text") or ""
+            for att in em.get("attachments", []):
+                if att["mime_type"] == "application/pdf":
+                    pdf_text = extract_text_from_pdf(att["bytes"])
+                    if pdf_text.strip():
+                        text = pdf_text
+                        break
+                elif att["mime_type"] in _IMAGE_MIMES:
+                    image_text = await extract_from_image(normalise_image(att["bytes"]))
+                    if image_text.strip():
+                        text = image_text
+                        break
+            label = f"{em.get('from', '')} | {em.get('subject', '').replace(chr(10), ' ')}"
+            result = await _run_ai_extraction(text, label, category_rules)
+            return em, result, None
+        except Exception as e:
+            log.warning("AI error | %s\n  → %s: %s", em.get("subject", "").replace("\n", " "), type(e).__name__, e)
+            return em, None, str(e)
+
+
+def _looks_financial(em: dict) -> bool:
+    sender = em.get("from") or ""
+    subject = em.get("subject") or ""
+    if _IGNORED_SENDERS_RE.search(sender):
+        return False
+    text = (em.get("raw_text") or "")[:2000]
+    combined = subject + " " + text
+    if _NON_FINANCIAL_RE.search(subject):
+        return False
+    if not _FINANCIAL_RE.search(combined):
+        return False
+    log.info("PASS | %s | %s", sender, subject)
+    return True
 
 # ── File upload ──────────────────────────────────────────────────────────────
 
@@ -349,26 +396,10 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
         raise HTTPException(status_code=422, detail="Could not extract text from file.")
 
     category_rules = _load_category_rules(db)
-    try:
-        similar = await rag.search(raw_text[:300], n_results=5)
-    except Exception:
-        similar = []
-    data = await extract_transaction(raw_text, category_rules=category_rules, similar_transactions=similar)
+    data = await _run_ai_extraction(raw_text, filename, category_rules)
     if not float(data.get("amount") or 0):
         raise HTTPException(status_code=422, detail="Could not extract a non-zero amount from file.")
-    t = Transaction(
-        date=data.get("date"),
-        vendor=data.get("vendor") or "",
-        amount=float(data.get("amount") or 0),
-        tax=float(data.get("tax") or 0),
-        category=data.get("category") or "other",
-        type=data.get("type") or "expense",
-        source=source,
-        source_ref=filename,
-        description=data.get("description"),
-        invoice_number=data.get("invoice_number"),
-        raw_text=raw_text,
-    )
+    t = _build_transaction(data, source=source, source_ref=filename, raw_text=raw_text)
     db.add(t)
     db.commit()
     db.refresh(t)
@@ -423,18 +454,8 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
 
             added = 0
             for tx in transactions:
-                t = Transaction(
-                    date=tx["date"],
-                    vendor=tx["vendor"],
-                    amount=tx["amount"],
-                    tax=tx["tax"],
-                    type=tx["type"],
-                    category=vendor_categories.get(tx["vendor"]) or tx["category"] or "other",
-                    description=tx["description"],
-                    invoice_number=tx["invoice_number"],
-                    source="csv",
-                    source_ref=filename,
-                )
+                data = {**tx, "category": vendor_categories.get(tx["vendor"]) or tx["category"] or "other"}
+                t = _build_transaction(data, source="csv", source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1
             db.commit()

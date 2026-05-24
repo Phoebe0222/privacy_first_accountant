@@ -75,57 +75,59 @@ def _is_financial(subject: str, body: str) -> bool:
     return any(kw in combined for kw in FINANCIAL_KEYWORDS)
 
 
-def fetch_emails(
+def fetch_email_headers(
     host: str,
     port: int,
     username: str,
     password: str,
     days_back: int = 30,
 ) -> list[dict]:
+    """Return lightweight header dicts {uid, subject, from, date} for all emails in range."""
     since = (datetime.now() - timedelta(days=days_back)).strftime("%d-%b-%Y")
     results = []
-
     with IMAPClient(host, port=port, ssl=True, timeout=30) as client:
         client.login(username, password)
         client.select_folder("INBOX", readonly=True)
         uids = client.search(["SINCE", since])
-
         if not uids:
             return results
-
-        # Step 1: fetch only headers for all emails (fast — no bodies/attachments)
-        headers = client.fetch(uids, ["BODY[HEADER.FIELDS (SUBJECT FROM DATE)]"])
-        financial_uids = []
-        for uid, data in headers.items():
-            raw_header = data[b"BODY[HEADER.FIELDS (SUBJECT FROM DATE)]"]
-            msg = email.message_from_bytes(raw_header)
-            subject = _decode_header_value(msg.get("Subject", ""))
-            sender = _decode_header_value(msg.get("From", ""))
-            if _is_financial(subject, ""):
-                financial_uids.append((uid, subject, sender, msg.get("Date", "")))
-
-        if not financial_uids:
-            return results
-
-        # Step 2: fetch full RFC822 only for emails that passed the subject filter
-        full_uids = [uid for uid, *_ in financial_uids]
-        messages = client.fetch(full_uids, ["RFC822"])
-        uid_meta = {uid: (subject, sender, date) for uid, subject, sender, date in financial_uids}
-
-        for uid, data in messages.items():
-            raw = data[b"RFC822"]
-            msg = email.message_from_bytes(raw)
-            subject, sender, date = uid_meta.get(uid, ("", "", ""))
-            body = _extract_text(msg)
-
+        raw_headers = client.fetch(uids, ["BODY[HEADER.FIELDS (SUBJECT FROM DATE)]"])
+        for uid, data in raw_headers.items():
+            msg = email.message_from_bytes(data[b"BODY[HEADER.FIELDS (SUBJECT FROM DATE)]"])
             results.append({
                 "uid": str(uid),
-                "subject": subject,
-                "from": sender,
-                "date": date,
+                "subject": _decode_header_value(msg.get("Subject", "")),
+                "from": _decode_header_value(msg.get("From", "")),
+                "date": msg.get("Date", ""),
+            })
+    return results
+
+
+def fetch_email_bodies(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    headers: list[dict],
+) -> list[dict]:
+    """Fetch full RFC822 bodies for the given header dicts and return complete email dicts."""
+    if not headers:
+        return []
+    uid_meta = {h["uid"]: h for h in headers}
+    int_uids = [int(uid) for uid in uid_meta]
+    results = []
+    with IMAPClient(host, port=port, ssl=True, timeout=30) as client:
+        client.login(username, password)
+        client.select_folder("INBOX", readonly=True)
+        messages = client.fetch(int_uids, ["RFC822"])
+        for uid, data in messages.items():
+            msg = email.message_from_bytes(data[b"RFC822"])
+            meta = uid_meta[str(uid)]
+            body = _extract_text(msg)
+            results.append({
+                **meta,
                 "body": body,
-                "raw_text": f"Subject: {subject}\nFrom: {sender}\nDate: {date}\n\n{body}",
+                "raw_text": f"Subject: {meta['subject']}\nFrom: {meta['from']}\nDate: {meta['date']}\n\n{body}",
                 "attachments": _extract_attachments(msg),
             })
-
     return results

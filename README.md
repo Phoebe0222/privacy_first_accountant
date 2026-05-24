@@ -100,6 +100,10 @@ Vector DB:
 
 - ### extraction
 1. a new transaction
+2. embed the transaction
+3. search for similar transactions
+4. add the similar transactions in the prompt
+5. better categorization and detect anomoly 
 
 - ### ATO rulings
 
@@ -148,13 +152,15 @@ Vector DB:
 ## Roadmap
 ### Phase 1
 - transaction ingestion
-- categorization
-- GST detection
+- **categorization** -- **this is hard**
+- anomaly detection
 - monthly summaries
+- User define rules from UI
+- remove duplication from different sources, e.g. back csv and emails
 ### Phase 2
 - BAS estimation
 - deduction recommendations
-- anomaly detection
+- GST detection
 ### Phase 3
 - ATO rule RAG
 - tax explanations

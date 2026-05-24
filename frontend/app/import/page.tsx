@@ -5,6 +5,24 @@ import { api, EmailAccount } from "@/lib/api";
 const GMAIL_IMAP = { host: "imap.gmail.com", port: 993 };
 const OUTLOOK_IMAP = { host: "outlook.office365.com", port: 993 };
 
+const SYNC_JOBS_KEY = "pa_sync_jobs";
+type SavedJob = { jobId: string; reimport: boolean };
+
+function getSavedJobs(): Record<number, SavedJob> {
+  try { return JSON.parse(localStorage.getItem(SYNC_JOBS_KEY) || "{}"); }
+  catch { return {}; }
+}
+function persistJob(id: number, jobId: string, reimport: boolean) {
+  const jobs = getSavedJobs();
+  jobs[id] = { jobId, reimport };
+  localStorage.setItem(SYNC_JOBS_KEY, JSON.stringify(jobs));
+}
+function removeJob(id: number) {
+  const jobs = getSavedJobs();
+  delete jobs[id];
+  localStorage.setItem(SYNC_JOBS_KEY, JSON.stringify(jobs));
+}
+
 export default function ImportPage() {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -25,7 +43,28 @@ export default function ImportPage() {
     api.getEmailAccounts().then(setAccounts).catch(() => {});
   }
 
-  useEffect(() => { loadAccounts(); }, []);
+  async function resumePolling(id: number, jobId: string, reimport: boolean) {
+    try {
+      const r = await api.pollJob(jobId);
+      setSyncResult(`Done: ${r.added} new transactions added, ${r.skipped} skipped.`);
+      loadAccounts();
+    } catch (e: unknown) {
+      setSyncResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      removeJob(id);
+      reimport ? setReimporting(null) : setSyncing(null);
+    }
+  }
+
+  useEffect(() => {
+    loadAccounts();
+    const saved = getSavedJobs();
+    for (const [idStr, { jobId, reimport }] of Object.entries(saved)) {
+      const id = Number(idStr);
+      reimport ? setReimporting(id) : setSyncing(id);
+      resumePolling(id, jobId, reimport);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleAddAccount(e: React.FormEvent) {
     e.preventDefault();
@@ -38,16 +77,17 @@ export default function ImportPage() {
   async function handleSync(id: number, reimport = false) {
     reimport ? setReimporting(id) : setSyncing(id);
     setSyncResult("");
+    let jobId: string;
     try {
-      const r = await api.syncEmailAccount(id, 30, reimport);
-      setSyncResult(`Done: ${r.added} new transactions added, ${r.skipped} skipped.`);
-      loadAccounts();
+      const res = await api.startSync(id, reimport);
+      jobId = res.job_id;
     } catch (e: unknown) {
       setSyncResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSyncing(null);
-      setReimporting(null);
+      reimport ? setReimporting(null) : setSyncing(null);
+      return;
     }
+    persistJob(id, jobId, reimport);
+    await resumePolling(id, jobId, reimport);
   }
 
   async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -166,7 +206,7 @@ export default function ImportPage() {
                   disabled={syncing === a.id || reimporting === a.id}
                   className="text-sm bg-gray-800 text-white px-4 py-2 rounded-lg hover:bg-gray-700 disabled:opacity-50"
                 >
-                  {syncing === a.id ? "Syncing…" : "Sync (30 days)"}
+                  {syncing === a.id ? "Syncing…" : "Sync"}
                 </button>
                 <button
                   onClick={() => handleSync(a.id, true)}
