@@ -8,52 +8,6 @@ OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
 EXTRACT_MODEL = "llama3.2:3b"
 VISION_MODEL = "moondream2"
 
-EXTRACTION_PROMPT = """Analyse the email text below and decide whether it contains a real financial transaction.
-
-First, set "skip" to true if the email is ANY of the following — these are NOT financial transactions:
-- Order dispatched / shipped / out for delivery / delivered / in transit
-- Logistics or tracking update ("view logistics", "track your order", "tracking number", "your parcel is on its way")
-- Marketing or promotional email with no actual charge
-- Account notification with no dollar amount (password reset, login alert, newsletter)
-- General correspondence with no invoice or payment
-
-If "skip" is true, set all other fields to null and stop — do not guess amounts.
-
-Otherwise set "skip" to false and extract the transaction details.
-
-Rules for "type" — read carefully:
-- "expense": YOU are paying money OUT. Strong signals: "you've paid", "you sent a payment", "receipt for your payment", "successfully sent a payment", "bill", "invoice", "amount due", "payment due", "please pay", "your bill has arrived", "order confirmation", "you placed an order"; you are the customer being charged.
-- "income": money is flowing IN to you. Strong signals: "payment received from", "you've been paid", "funds deposited", "payout", "we've sent you", "money has been sent to you"; you are receiving funds FROM someone else.
-- WARNING: "payment" alone does NOT mean income. "Receipt for your payment" and "you've paid [merchant]" are EXPENSES — you are the one who paid.
-- A positive dollar amount does NOT mean income — receipts and invoices always show positive amounts.
-- Utility bills, subscription charges, supplier invoices, and payment receipts where YOU paid are ALWAYS expenses.
-- Subject "Receipt for Your Payment" is ALWAYS an expense.
-- Default to "expense" when uncertain.
-
-{vendor_rules_section}{similar_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
-
-JSON format:
-{{
-  "skip": false,
-  "date": "YYYY-MM-DD or null",
-  "vendor": "company or person name",
-  "amount": 0.00,
-  "tax": 0.00,
-  "category": "one of: food, transport, utilities, software, marketing, revenue, salary, office, subscription, other",
-  "type": "expense or income — see rules above",
-  "description": "one-line summary",
-  "invoice_number": "string or null",
-  "anomaly": false,
-  "anomaly_reason": "brief explanation if anomaly is true, else null"
-}}
-
-Text:
-{text}"""
-
-CHAT_SYSTEM = """You are a private business accountant assistant. You have access to the user's financial data.
-Answer questions about their transactions, spending, revenue, and cash flow.
-Be concise and use numbers from the data provided. Format currency values clearly."""
-
 
 def _parse_json(raw: str) -> dict:
     start = raw.find("{")
@@ -117,6 +71,7 @@ async def _ollama_generate(prompt: str, retries: int = 3) -> str:
     raise last_err
 
 
+
 def _format_vendor_rules_section(rules: list[tuple[str, str]] | None) -> str:
     if not rules:
         return ""
@@ -126,6 +81,104 @@ def _format_vendor_rules_section(rules: list[tuple[str, str]] | None) -> str:
         "use the specified category:\n" + lines + "\n\n"
     )
 
+
+def _format_similar_section(similar: list[str] | None) -> str:
+    if not similar:
+        return ""
+    entries = "\n---\n".join(similar[:5])
+    return (
+        "Past similar transactions from your records (use for categorisation and anomaly detection):\n"
+        + entries
+        + "\n\nIf the current amount differs significantly (more than 2x) from past amounts for the same vendor, "
+        "set anomaly to true and explain briefly in anomaly_reason.\n\n"
+    )
+
+# --extraction-------------------------------------
+
+EXTRACTION_PROMPT = """Analyse the email text below and decide whether it contains a real financial transaction.
+
+First, set "skip" to true if the email is ANY of the following — these are NOT financial transactions:
+- Order dispatched / shipped / out for delivery / delivered / in transit
+- Logistics or tracking update ("view logistics", "track your order", "tracking number", "your parcel is on its way")
+- Marketing or promotional email with no actual charge
+- Account notification with no dollar amount (password reset, login alert, newsletter)
+- General correspondence with no invoice or payment
+
+If "skip" is true, set all other fields to null and stop — do not guess amounts.
+
+Otherwise set "skip" to false and extract the transaction details.
+
+Rules for "type" — read carefully:
+- "expense": YOU are paying money OUT. Strong signals: "you've paid", "you sent a payment", "receipt for your payment", "successfully sent a payment", "bill", "invoice", "amount due", "payment due", "please pay", "your bill has arrived", "order confirmation", "you placed an order"; you are the customer being charged.
+- "income": money is flowing IN to you. Strong signals: "payment received from", "you've been paid", "funds deposited", "payout", "we've sent you", "money has been sent to you"; you are receiving funds FROM someone else.
+- WARNING: "payment" alone does NOT mean income. "Receipt for your payment" and "you've paid [merchant]" are EXPENSES — you are the one who paid.
+- A positive dollar amount does NOT mean income — receipts and invoices always show positive amounts.
+- Utility bills, subscription charges, supplier invoices, and payment receipts where YOU paid are ALWAYS expenses.
+- Subject "Receipt for Your Payment" is ALWAYS an expense.
+- Default to "expense" when uncertain.
+
+{vendor_rules_section}{similar_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
+
+JSON format:
+{{
+  "skip": false,
+  "date": "YYYY-MM-DD or null",
+  "vendor": "company or person name",
+  "amount": 0.00,
+  "tax": 0.00,
+  "category": "one of: food, transport, utilities, software, marketing, revenue, salary, office, subscription, other",
+  "type": "expense or income — see rules above",
+  "description": "one-line summary",
+  "invoice_number": "string or null",
+  "anomaly": false,
+  "anomaly_reason": "brief explanation if anomaly is true, else null"
+}}
+
+Text:
+{text}"""
+
+
+async def extract_transaction(
+    text: str,
+    category_rules: list[tuple[str, str]] | None = None,
+    similar_transactions: list[str] | None = None,
+) -> dict:
+    safe_text = text[:3000].replace("{", "{{").replace("}", "}}")
+    vendor_rules_section = _format_vendor_rules_section(category_rules)
+    similar_section = _format_similar_section(similar_transactions).replace("{", "{{").replace("}", "}}")
+    prompt = EXTRACTION_PROMPT.format(
+        text=safe_text,
+        vendor_rules_section=vendor_rules_section,
+        similar_section=similar_section,
+    )
+    raw = await _ollama_generate(prompt)
+    data = _parse_json(raw)
+    data.setdefault("tax", 0.0)
+    data.setdefault("invoice_number", None)
+    data.setdefault("anomaly", False)
+    data.setdefault("anomaly_reason", None)
+    return data
+
+
+async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    import base64
+
+    b64 = base64.b64encode(image_bytes).decode()
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            f"{OLLAMA_BASE}/api/generate",
+            json={
+                "model": VISION_MODEL,
+                "prompt": "Describe all text visible in this receipt or invoice image. Include vendor name, date, amounts, tax, and any invoice number.",
+                "images": [b64],
+                "stream": False,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()["response"]
+
+
+# ---- categorize -------------------------------
 
 CATEGORIZE_VENDORS_PROMPT = """Categorise each vendor name below into exactly one category.
 
@@ -157,39 +210,8 @@ async def categorize_vendors(
     return _parse_json(raw)
 
 
-def _format_similar_section(similar: list[str] | None) -> str:
-    if not similar:
-        return ""
-    entries = "\n---\n".join(similar[:5])
-    return (
-        "Past similar transactions from your records (use for categorisation and anomaly detection):\n"
-        + entries
-        + "\n\nIf the current amount differs significantly (more than 2x) from past amounts for the same vendor, "
-        "set anomaly to true and explain briefly in anomaly_reason.\n\n"
-    )
 
-
-async def extract_transaction(
-    text: str,
-    category_rules: list[tuple[str, str]] | None = None,
-    similar_transactions: list[str] | None = None,
-) -> dict:
-    safe_text = text[:3000].replace("{", "{{").replace("}", "}}")
-    vendor_rules_section = _format_vendor_rules_section(category_rules)
-    similar_section = _format_similar_section(similar_transactions).replace("{", "{{").replace("}", "}}")
-    prompt = EXTRACTION_PROMPT.format(
-        text=safe_text,
-        vendor_rules_section=vendor_rules_section,
-        similar_section=similar_section,
-    )
-    raw = await _ollama_generate(prompt)
-    data = _parse_json(raw)
-    data.setdefault("tax", 0.0)
-    data.setdefault("invoice_number", None)
-    data.setdefault("anomaly", False)
-    data.setdefault("anomaly_reason", None)
-    return data
-
+# --- mapping -------------------------------------
 
 MAPPING_PROMPT = """You are given the column headers and sample rows from a financial CSV export.
 The file may be from a bank, PayPal, Etsy, Stripe, Alibaba, a supplier, or any other source.
@@ -247,22 +269,15 @@ async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
     return resolved
 
 
-async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
-    import base64
 
-    b64 = base64.b64encode(image_bytes).decode()
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{OLLAMA_BASE}/api/generate",
-            json={
-                "model": VISION_MODEL,
-                "prompt": "Describe all text visible in this receipt or invoice image. Include vendor name, date, amounts, tax, and any invoice number.",
-                "images": [b64],
-                "stream": False,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()["response"]
+
+
+
+# --- chat -------------------------------------
+
+CHAT_SYSTEM = """You are a private business accountant assistant. You have access to the user's financial data.
+Answer questions about their transactions, spending, revenue, and cash flow.
+Be concise and use numbers from the data provided. Format currency values clearly."""
 
 
 async def chat(messages: list[dict], context: str) -> str:

@@ -194,7 +194,8 @@ async def sync_email_account(
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
     
-    # TODO: add option to sync for a specific date range, not just "last N days", max is one year
+    # TODO: add option to sync for a specific date range, not just "last N days",
+    # for example, synv from beginning of the financial year
 
     if reimport: # re-import option: delete existing transactions from this account before syncing
         db.query(Transaction).filter(Transaction.source == "email").delete()
