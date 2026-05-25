@@ -2,9 +2,26 @@
 import { useEffect, useState } from "react";
 import { api, Transaction } from "@/lib/api";
 
-const CATEGORIES = ["all", "food", "transport", "utilities", "software", "marketing", "revenue", "salary", "office", "subscription", "other"];
+const CATEGORIES = ["all", "food", "grocery", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "office", "subscription", "shopping", "leisure", "material", "other"];
 const FORM_CATEGORIES = CATEGORIES.filter((c) => c !== "all");
 const EMPTY_FORM = { date: "", vendor: "", amount: "", tax: "", category: "other", type: "expense" as "income" | "expense", description: "" };
+
+function fyStartYear(): number {
+  const now = new Date();
+  return now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+function fyOptions() {
+  const current = fyStartYear();
+  return Array.from({ length: 4 }, (_, i) => current - i).map((y) => ({
+    label: `FY ${y}–${String(y + 1).slice(2)}`,
+    value: `fy:${y}`,
+    from: `${y}-07-01`,
+    to: `${y + 1}-06-30`,
+  }));
+}
+
+const FY_OPTIONS = fyOptions();
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n);
@@ -20,18 +37,26 @@ export default function TransactionsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [dateRange, setDateRange] = useState<"all" | "custom" | string>(`fy:${fyStartYear()}`);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [source, setSource] = useState("");
+  const [vendor, setVendor] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "" });
+  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense" });
 
   function load() {
     setLoading(true);
+    const fy = FY_OPTIONS.find((o) => o.value === dateRange);
+    const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
+    const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
     api
-      .getTransactions({ type: type || undefined, category: category === "all" ? undefined : category })
+      .getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, vendor: vendor || undefined })
       .then(({ items, total }) => { setItems(items); setTotal(total); })
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, [type, category]);
+  useEffect(() => { load(); }, [type, category, dateRange, customFrom, customTo, source, vendor]);
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this transaction?")) return;
@@ -68,14 +93,9 @@ export default function TransactionsPage() {
     load();
   }
 
-  async function handleTypeChange(id: number, newType: "income" | "expense") {
-    await api.updateTransaction(id, { type: newType });
-    load();
-  }
-
   function startEdit(t: Transaction) {
     setEditingId(t.id);
-    setEditForm({ vendor: t.vendor, category: t.category, amount: String(t.amount), tax: String(t.tax) });
+    setEditForm({ vendor: t.vendor, category: t.category, amount: String(t.amount), tax: String(t.tax), type: t.type });
   }
 
   async function saveEdit(id: number) {
@@ -84,6 +104,7 @@ export default function TransactionsPage() {
       category: editForm.category,
       amount: parseFloat(editForm.amount) || 0,
       tax: parseFloat(editForm.tax) || 0,
+      type: editForm.type,
     });
     setEditingId(null);
     load();
@@ -148,7 +169,7 @@ export default function TransactionsPage() {
         </form>
       )}
 
-      <div className="flex gap-4">
+      <div className="flex flex-wrap gap-3 items-center">
         <select value={type} onChange={(e) => setType(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
           <option value="">All types</option>
@@ -161,6 +182,37 @@ export default function TransactionsPage() {
             <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
           ))}
         </select>
+        <select value={dateRange} onChange={(e) => setDateRange(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+          {FY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          <option value="all">All time</option>
+          <option value="custom">Custom range</option>
+        </select>
+        {dateRange === "custom" && (
+          <>
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" />
+            <span className="text-gray-400 text-sm">to</span>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" />
+          </>
+        )}
+        <select value={source} onChange={(e) => setSource(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+          <option value="">All sources</option>
+          <option value="email">Email</option>
+          <option value="csv">CSV</option>
+          <option value="pdf">PDF</option>
+          <option value="image">Image</option>
+          <option value="manual">Manual</option>
+        </select>
+        <input
+          type="text"
+          placeholder="Vendor…"
+          value={vendor}
+          onChange={(e) => setVendor(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white w-36"
+        />
       </div>
 
       {loading ? (
@@ -202,7 +254,10 @@ export default function TransactionsPage() {
                           autoFocus
                         />
                       ) : (
-                        <span className="font-medium text-gray-800">{t.vendor}</span>
+                        <>
+                          <span className="font-medium text-gray-800">{t.vendor}</span>
+                          {t.description && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{t.description}</p>}
+                        </>
                       )}
                     </td>
 
@@ -221,14 +276,20 @@ export default function TransactionsPage() {
                     </td>
 
                     <td className="px-4 py-3">
-                      <select
-                        value={t.type}
-                        onChange={(e) => handleTypeChange(t.id, e.target.value as "income" | "expense")}
-                        className={`text-xs font-medium px-2 py-0.5 rounded border-0 cursor-pointer ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}
-                      >
-                        <option value="income">income</option>
-                        <option value="expense">expense</option>
-                      </select>
+                      {editing ? (
+                        <select
+                          value={editForm.type}
+                          onChange={(e) => setEditForm({ ...editForm, type: e.target.value as "income" | "expense" })}
+                          className="border border-blue-300 rounded px-2 py-1 text-sm"
+                        >
+                          <option value="income">income</option>
+                          <option value="expense">expense</option>
+                        </select>
+                      ) : (
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                          {t.type}
+                        </span>
+                      )}
                     </td>
 
                     <td className="px-4 py-3 text-gray-400 capitalize">{t.source}</td>

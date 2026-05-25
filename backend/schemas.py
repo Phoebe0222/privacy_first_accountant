@@ -17,6 +17,11 @@ class VendorRuleCreate(BaseModel):
     category: str
 
 
+class ATORuleCreate(BaseModel):
+    title: str
+    description: str
+
+
 class ChatRequest(BaseModel):
     message: str
 

@@ -3,7 +3,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import ChatMessage, Transaction
+from backend.models import ATORule, ChatMessage, Transaction
 from backend.schemas import ChatRequest
 from backend.services.ai import chat as ai_chat
 from backend.services import rag
@@ -65,14 +65,19 @@ def _build_context(db: Session, relevant_docs: list[str]) -> str:
         f"Total transactions indexed: {rag.indexed_count()}",
     ]
 
-    # RAG results injected here
+    ato_rules = db.query(ATORule).order_by(ATORule.title).all()
+    #TODO: maybe build a different prompt for tax-related questions that includes the ATO rules, and a more general prompt for other questions that doesn't include the ATO rules, to avoid overwhelming the model with too much information when it's not relevant.
+    if ato_rules:
+        lines += ["", "Australian tax rules and context:"]
+        for r in ato_rules:
+            lines.append(f"  {r.title}: {r.description}")
+
     if relevant_docs:
         lines += ["", "Most relevant transactions for this query:"]
         for doc in relevant_docs:
-            lines.append(doc)  # ← each matching transaction as text
+            lines.append(doc)
             lines.append("---")
     else:
-        # Fallback when RAG index is empty
         recent = (
             db.query(Transaction)
             .order_by(Transaction.date.desc())

@@ -17,6 +17,10 @@ def list_transactions(
     type: Optional[str] = None,
     category: Optional[str] = None,
     month: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    source: Optional[str] = None,
+    vendor: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -28,6 +32,14 @@ def list_transactions(
         q = q.filter(Transaction.category == category)
     if month:
         q = q.filter(Transaction.date.like(f"{month}%"))
+    if date_from:
+        q = q.filter(Transaction.date >= date_from)
+    if date_to:
+        q = q.filter(Transaction.date <= date_to)
+    if source:
+        q = q.filter(Transaction.source == source)
+    if vendor:
+        q = q.filter(Transaction.vendor.ilike(f"%{vendor}%"))
     total = q.count()
     items = q.order_by(Transaction.date.desc()).offset(offset).limit(limit).all()
     return {"total": total, "items": [_serialize(t) for t in items]}

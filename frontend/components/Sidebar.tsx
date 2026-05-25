@@ -7,6 +7,7 @@ const links = [
   { href: "/transactions", label: "Transactions", icon: "💳" },
   { href: "/import", label: "Import", icon: "📥" },
   { href: "/chat", label: "Chat", icon: "💬" },
+  { href: "/rules", label: "Rules", icon: "🏷️" },
 ];
 
 export default function Sidebar() {

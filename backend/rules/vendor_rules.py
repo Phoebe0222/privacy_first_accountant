@@ -1,8 +1,9 @@
 VALID_CATEGORIES = frozenset({
-    "food", "transport", "utilities", "software", "marketing",
-    "revenue", "salary", "office", "subscription", "other",
+    "food", "grocery", "transport", "travel", "utilities", "software", "marketing",
+    "revenue", "salary", "office", "subscription", "shopping", "leisure", "material", "other",
 })
-
+# these are built-in rules, which will be overridden by user-defined rules if there are any conflicts.
+# They are used as a fallback for categorisation when no user-defined rules match, and also to provide examples of how rules can be defined.
 # Sorted longest-first so more specific patterns win (e.g. "uber eats" before "uber")
 BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("uber eats", "food"),
@@ -62,5 +63,3 @@ BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("vodafone", "utilities"),
     ("auspost", "utilities"),
 ], key=lambda x: len(x[0]), reverse=True)
-
-# TODO: add ability for users to add their own rules, e.g. "any transaction with 'woolworths' in the description is categorized as 'food'". This would be in addition to the built-in rules above, which should not be editable by users. User-defined rules should be stored in the database and loaded into memory on startup, and applied after the built-in rules.

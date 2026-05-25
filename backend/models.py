@@ -53,3 +53,12 @@ class VendorRule(Base):
     vendor_pattern = Column(String, nullable=False)
     category = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ATORule(Base):
+    __tablename__ = "ato_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

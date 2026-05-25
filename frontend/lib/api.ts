@@ -36,7 +36,7 @@ export interface Summary {
 export const api = {
   getSummary: () => req<Summary>("/transactions/summary"),
 
-  getTransactions: (params?: { type?: string; category?: string; month?: string }) => {
+  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; vendor?: string }) => {
     const defined = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );
@@ -104,6 +104,36 @@ export const api = {
     const { job_id } = await req<{ job_id: string }>("/import/csv", { method: "POST", body: form });
     return api.pollJob(job_id);
   },
+
+  // ── Vendor rules ────────────────────────────────────────────────────────
+
+  getVendorRules: () => req<{ id: number; vendor_pattern: string; category: string }[]>("/vendor-rules"),
+
+  getBuiltInRules: () => req<{ vendor_pattern: string; category: string }[]>("/vendor-rules/built-in"),
+
+  createVendorRule: (vendor_pattern: string, category: string) =>
+    req<{ id: number; vendor_pattern: string; category: string }>("/vendor-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vendor_pattern, category }),
+    }),
+
+  deleteVendorRule: (id: number) =>
+    req<{ ok: boolean }>(`/vendor-rules/${id}`, { method: "DELETE" }),
+
+  // ── ATO rules ───────────────────────────────────────────────────────────
+
+  getATORules: () => req<{ id: number; title: string; description: string }[]>("/ato-rules"),
+
+  createATORule: (title: string, description: string) =>
+    req<{ id: number; title: string; description: string }>("/ato-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, description }),
+    }),
+
+  deleteATORule: (id: number) =>
+    req<{ ok: boolean }>(`/ato-rules/${id}`, { method: "DELETE" }),
 
   // ── Chat ────────────────────────────────────────────────────────────────
 

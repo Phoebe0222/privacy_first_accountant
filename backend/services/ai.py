@@ -102,6 +102,9 @@ EXTRACTION_PROMPT = """Analyse the email text below and decide whether it contai
 First, set "skip" to true if the email is ANY of the following — these are NOT financial transactions:
 - Order dispatched / shipped / out for delivery / delivered / in transit
 - Logistics or tracking update ("view logistics", "track your order", "tracking number", "your parcel is on its way")
+- Payment reminder or pending payment — no money has actually moved yet. Strong signals: "waiting for payment", "awaiting payment", "complete your payment", "complete your purchase", "your order is waiting", "unpaid order", "payment required", "action required", "your cart", "abandoned cart", "don't forget to pay", "pro forma invoice", "on the way"
+- Declined or failed payment — no money actually moved. ALWAYS skip these regardless of any dollar amount shown. Any of the following means skip=true: "payment declined", "payment unsuccessful", "payment failed", "payment method failed", "rejected", "transaction declined", "card declined", "could not process", "unable to process your payment", "we were unable to charge", "your payment could not be processed", "try again", "update your payment method", "retry payment", "payment issue", "billing problem", "payment attempt failed". RULE: if the email is asking you to fix a payment or retry, no money moved — set skip to true.
+- Winnings, rewards, or gift cards — these are NOT real income. Strong signals: "you've won", "you won", "congratulations", "reward points", "gift card", "gift voucher", "loyalty points", "cashback reward", "bonus points", "prize", "you've been selected". Even if a dollar amount appears, set skip to true.
 - Marketing or promotional email with no actual charge
 - Account notification with no dollar amount (password reset, login alert, newsletter)
 - General correspondence with no invoice or payment
@@ -111,7 +114,7 @@ If "skip" is true, set all other fields to null and stop — do not guess amount
 Otherwise set "skip" to false and extract the transaction details.
 
 Rules for "type" — read carefully:
-- "expense": YOU are paying money OUT. Strong signals: "you've paid", "you sent a payment", "receipt for your payment", "successfully sent a payment", "bill", "invoice", "amount due", "payment due", "please pay", "your bill has arrived", "order confirmation", "you placed an order"; you are the customer being charged.
+- "expense": YOU are paying money OUT. Strong signals: "you've paid", "you sent a payment", "receipt for your payment", "your payment has been received", "payment received", "successfully sent a payment", "bill", "invoice", "amount due", "payment due", "please pay", "your bill has arrived", "order confirmation", "you placed an order"; you are the customer being charged.
 - "income": money is flowing IN to you. Strong signals: "payment received from", "you've been paid", "funds deposited", "payout", "we've sent you", "money has been sent to you"; you are receiving funds FROM someone else.
 - WARNING: "payment" alone does NOT mean income. "Receipt for your payment" and "you've paid [merchant]" are EXPENSES — you are the one who paid.
 - A positive dollar amount does NOT mean income — receipts and invoices always show positive amounts.
@@ -121,23 +124,44 @@ Rules for "type" — read carefully:
 
 {vendor_rules_section}{similar_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.
 
+IMPORTANT — number format: these are Australian documents. Commas are THOUSANDS SEPARATORS, dots are decimal points. So "$1,000" means one thousand dollars (1000.00), NOT 1.00. "$1,234.56" means 1234.56. Write amounts as plain decimals in your JSON output: 1000.00, never 1,000.
+
 JSON format:
 {{
   "skip": false,
-  "date": "YYYY-MM-DD or null",
+  "date": "YYYY-MM-DD — always use this exact format, e.g. 2024-03-15. Never use slashes, never write the month as a word.",
   "vendor": "company or person name",
   "amount": 0.00,
   "tax": 0.00,
-  "category": "one of: food, transport, utilities, software, marketing, revenue, salary, office, subscription, other",
+  "category": "one of: food, grocery, transport, travel, utilities, software, marketing, revenue, salary, office, subscription, shopping, leisure, material, other",
   "type": "expense or income — see rules above",
   "description": "one-line summary",
-  "invoice_number": "string or null",
+  "invoice_number": "order number, invoice number, reference number, transaction ID, or null — look for labels like Order #, Invoice #, Ref, Transaction ID, Order ID, Confirmation #",
   "anomaly": false,
   "anomaly_reason": "brief explanation if anomaly is true, else null"
 }}
 
 Text:
 {text}"""
+
+
+_DATE_FMTS = [
+    "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%m-%d-%Y",
+    "%d %B %Y", "%d %b %Y", "%B %d, %Y", "%b %d, %Y",
+    "%d/%m/%y", "%m/%d/%y",
+]
+
+def _normalise_date(val) -> str | None:
+    if not val or not isinstance(val, str):
+        return None
+    val = val.strip()
+    for fmt in _DATE_FMTS:
+        try:
+            from datetime import datetime as _dt
+            return _dt.strptime(val, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return val  # return as-is if nothing matched; caller can handle null
 
 
 async def extract_from_text(
@@ -155,6 +179,7 @@ async def extract_from_text(
     )
     raw = await _ollama_generate(prompt)
     data = _parse_json(raw)
+    data["date"] = _normalise_date(data.get("date"))
     data.setdefault("tax", 0.0)
     data.setdefault("invoice_number", None)
     data.setdefault("anomaly", False)
@@ -184,7 +209,7 @@ async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") 
 
 CATEGORIZE_VENDORS_PROMPT = """Categorise each vendor name below into exactly one category.
 
-Valid categories: food, transport, utilities, software, marketing, revenue, salary, office, subscription, other
+Valid categories: food, grocery, transport, travel, utilities, software, marketing, revenue, salary, office, subscription, shopping, leisure, material, other
 
 {vendor_rules_section}Vendors to categorise:
 {vendors}

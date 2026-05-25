@@ -35,16 +35,27 @@ router = APIRouter(prefix="/import", tags=["import"])
 _jobs: dict[str, dict] = {}
 
 _FINANCIAL_RE = re.compile(
-    r"[\$£€]|\binvoice\b|\bbill\b|\breceipt\b|\bpayment\b|\bcharge\b"
+    r"\binvoice\b|\bbill\b|\breceipt\b|\bpayment\b|\bcharge\b|\bpaid\b|\border\b"
     r"|\bsubscription\b|amount due|due date|total due"
     r"|order confirmation|\bstatement\b|\bpayout\b"
-    r"|\brefund\b|\bdeposit\b",
+    r"|\brefund\b|\bdeposit\b|\bfunds\b",
     re.IGNORECASE,
 )
 _NON_FINANCIAL_RE = re.compile(
     r"\bdispatched\b|\bshipped\b|\btracking\b|\bdelivered\b"
     r"|\blogistics\b|\bparcel\b|\bshipment\b"
-    r"|out for delivery|in transit|is on its way|has left|cleared customs",
+    r"|out for delivery|in transit|is on its way|has left|cleared customs"
+    r"|waiting for payment|awaiting payment|complete your payment|complete your purchase"
+    r"|your order is waiting|unpaid order|abandoned cart|don't forget to pay"
+    r"|\byou.?ve won\b|\byou won\b|\bcongratulations\b|\breward points\b|\bgift card\b|\bgift voucher\b"
+    r"|\bloyalty points\b|\bcashback reward\b|\bbonus points\b|\bprize\b"
+    r"|payment declined|payment unsuccessful|payment failed|transaction declined"
+    r"|card declined|could not process|unable to process your payment"
+    r"|retry payment|update your payment|billing problem|payment issue|payment attempt"
+    r"|we were unable to charge|your payment could not"
+    r"|\bdeals?\b|\bspecial offer\b|\bflash sale\b|\bexclusive offer\b|\blimited time\b"
+    r"|\boff\b.*%|\b\d+%\s*off\b|\bfancy a\b|\bdiscount\b|\bpromo\b|\bsale ends\b"
+    r"|\bdon.?t miss\b|\bact now\b|\bhurry\b|\blast chance\b",
     re.IGNORECASE,
 )
 _IGNORED_SENDERS_RE = re.compile(
@@ -91,6 +102,43 @@ async def _run_ai_extraction(
     return result
 
 
+def _is_content_duplicate(db: Session, data: dict) -> bool:
+    """Return True if an equivalent transaction already exists in the DB."""
+    vendor = (data.get("vendor") or "").strip().lower()
+    amount = _to_float(data.get("amount"))
+    date_val = data.get("date")
+    inv = (data.get("invoice_number") or "").strip()
+    tx_type = data.get("type") or "expense"
+
+    if inv:
+        exists = db.query(Transaction).filter(
+            Transaction.invoice_number == inv,
+            Transaction.amount == amount,
+        ).first()
+    else:
+        exists = db.query(Transaction).filter(
+            Transaction.date == date_val,
+            Transaction.amount == amount,
+            Transaction.type == tx_type,
+        ).first()
+        if exists:
+            # Extra guard: vendor names can vary slightly; skip only if vendor matches roughly
+            existing_vendor = (exists.vendor or "").strip().lower()
+            if vendor and existing_vendor and existing_vendor not in vendor and vendor not in existing_vendor:
+                exists = None
+
+    return exists is not None
+
+
+def _to_float(val) -> float:
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    cleaned = re.sub(r"[^\d.]", "", str(val))
+    return float(cleaned) if cleaned else 0.0
+
+
 def _build_transaction(
     data: dict,
     source: str,
@@ -106,8 +154,8 @@ def _build_transaction(
     return Transaction(
         date=data.get("date") or fallback_date,
         vendor=data.get("vendor") or fallback_vendor or "",
-        amount=float(data.get("amount") or 0),
-        tax=float(data.get("tax") or 0),
+        amount=_to_float(data.get("amount")),
+        tax=_to_float(data.get("tax")),
         category=data.get("category") or "other",
         type=data.get("type") or "expense",
         source=source,
@@ -276,14 +324,14 @@ async def _run_email_sync(
         category_rules = _load_category_rules(db)
         sem = asyncio.Semaphore(3)
 
-        t2 = time.monotonic()
-        results = await asyncio.gather(*[_extract_email(em, sem, category_rules) for em in financial_emails])
-        log.info("TIMING | all AI calls: %.1fs  (%.1fs/email avg)", time.monotonic() - t2, (time.monotonic() - t2) / max(len(financial_emails), 1))
-
         errors = []
         skipped_count = 0
         added_transactions: list[Transaction] = []
-        for em, data, err in results:
+        tasks = [asyncio.create_task(_extract_email(em, sem, category_rules)) for em in financial_emails]
+        t2 = time.monotonic()
+
+        for coro in asyncio.as_completed(tasks):
+            em, data, err = await coro
             if err:
                 errors.append({"uid": f"{account_id}:{em['uid']}", "error": err})
                 continue
@@ -291,8 +339,12 @@ async def _run_email_sync(
                 log.info("AI SKIP | %s", em.get("subject", ""))
                 skipped_count += 1
                 continue
-            if not float(data.get("amount") or 0):
+            if not _to_float(data.get("amount")):
                 log.info("AI SKIP (zero amount) | %s", em.get("subject", "").replace("\n", " "))
+                skipped_count += 1
+                continue
+            if _is_content_duplicate(db, data):
+                log.info("AI SKIP (duplicate) | %s | %s | $%s", data.get("vendor"), data.get("date"), data.get("amount"))
                 skipped_count += 1
                 continue
             t = _build_transaction(
@@ -306,15 +358,17 @@ async def _run_email_sync(
             )
             log.info("SAVED | %s | %s | %s $%s", t.type, t.vendor, t.date, t.amount)
             db.add(t)
+            db.commit()
+            db.refresh(t)
             added_transactions.append(t)
+            _jobs[job_id] = {"status": "running", "added": len(added_transactions), "total": len(financial_emails)}
+
+        log.info("TIMING | all AI calls: %.1fs  (%.1fs/email avg)", time.monotonic() - t2, (time.monotonic() - t2) / max(len(financial_emails), 1))
 
         account = db.get(EmailAccount, account_id)
         if account:
             account.last_synced = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
-
-        for t in added_transactions:
-            db.refresh(t)
 
         added = len(added_transactions)
         pre_filtered = len(emails) - len(financial_emails)
@@ -397,7 +451,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 
     category_rules = _load_category_rules(db)
     data = await _run_ai_extraction(raw_text, filename, category_rules)
-    if not float(data.get("amount") or 0):
+    if not _to_float(data.get("amount")):
         raise HTTPException(status_code=422, detail="Could not extract a non-zero amount from file.")
     t = _build_transaction(data, source=source, source_ref=filename, raw_text=raw_text)
     db.add(t)
