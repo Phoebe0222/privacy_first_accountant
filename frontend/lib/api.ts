@@ -61,6 +61,12 @@ export const api = {
   deleteTransaction: (id: number) =>
     req<{ ok: boolean }>(`/transactions/${id}`, { method: "DELETE" }),
 
+  deleteBySourceRef: (sourceRef: string) =>
+    req<{ deleted: number }>(`/transactions?source_ref=${encodeURIComponent(sourceRef)}`, { method: "DELETE" }),
+
+  deleteBySource: (source: string) =>
+    req<{ deleted: number }>(`/transactions?source=${encodeURIComponent(source)}`, { method: "DELETE" }),
+
   // ── Import ──────────────────────────────────────────────────────────────
 
   getEmailAccounts: () => req<EmailAccount[]>("/import/email-accounts"),
@@ -102,7 +108,8 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     const { job_id } = await req<{ job_id: string }>("/import/csv", { method: "POST", body: form });
-    return api.pollJob(job_id);
+    const result = await api.pollJob(job_id);
+    return { ...result, filename: file.name };
   },
 
   // ── Vendor rules ────────────────────────────────────────────────────────

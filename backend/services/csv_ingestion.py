@@ -3,14 +3,38 @@ import io
 import re
 
 
+_DATE_RE = re.compile(r"^\d{1,4}[-/]\d{1,2}[-/]\d{2,4}$|^\d{1,2}\s+\w+\s+\d{2,4}$")
+_NUMBER_RE = re.compile(r'^-?\s*["$]?[\d,]+\.?\d*$')
+
+
+def _looks_like_data_row(row: list[str]) -> bool:
+    """Return True if the first row appears to be data rather than headers."""
+    if not row:
+        return False
+    first = row[0].strip().strip('"')
+    return bool(_DATE_RE.match(first) or _NUMBER_RE.match(first))
+
+
 def parse_csv(file_bytes: bytes, filename: str = "") -> tuple[list[str], list[dict]]:
     if filename.lower().endswith((".xlsx", ".xls")):
         return _parse_excel(file_bytes)
     text = file_bytes.decode("utf-8-sig", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = reader.fieldnames or []
-    rows = [dict(row) for row in reader]
-    return list(headers), rows
+    raw_reader = csv.reader(io.StringIO(text))
+    first_row = next(raw_reader, None)
+    if first_row is None:
+        return [], []
+    if _looks_like_data_row(first_row):
+        # No headers — generate col_0, col_1, …
+        headers = [f"col_{i}" for i in range(len(first_row))]
+        all_rows = [first_row] + list(raw_reader)
+    else:
+        headers = [h.strip() for h in first_row]
+        all_rows = list(raw_reader)
+    rows = [
+        {headers[i]: cell.strip() for i, cell in enumerate(row) if i < len(headers)}
+        for row in all_rows
+    ]
+    return headers, rows
 
 
 def _parse_excel(file_bytes: bytes) -> tuple[list[str], list[dict]]:
@@ -130,6 +154,7 @@ def _normalise_date(raw: str) -> str:
     raw = raw.split(" ")[0].split("T")[0]
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y",
                 "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+                "%d %b %y", "%d %B %y",
                 "%Y/%m/%d", "%d-%b-%Y"):
         try:
             return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")

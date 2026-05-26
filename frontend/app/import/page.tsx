@@ -38,6 +38,7 @@ export default function ImportPage() {
   const csvRef = useRef<HTMLInputElement>(null);
   const [csvUploading, setCsvUploading] = useState(false);
   const [csvResult, setCsvResult] = useState<string>("");
+  const [lastCsvFile, setLastCsvFile] = useState<string | null>(null);
 
   function loadAccounts() {
     api.getEmailAccounts().then(setAccounts).catch(() => {});
@@ -98,6 +99,7 @@ export default function ImportPage() {
     try {
       const r = await api.uploadCsv(file);
       setCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
+      setLastCsvFile(r.filename);
     } catch (err: unknown) {
       setCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -228,7 +230,24 @@ export default function ImportPage() {
 
       {/* CSV upload */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-700">Bank / Stripe / PayPal CSV Export</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-gray-700">Bank / Stripe / PayPal CSV Export</h3>
+          <button
+            onClick={async () => {
+              if (!confirm("Delete ALL CSV-imported transactions? This cannot be undone.")) return;
+              try {
+                const r = await api.deleteBySource("csv");
+                setCsvResult(`Removed ${r.deleted} CSV transactions.`);
+                setLastCsvFile(null);
+              } catch (e: unknown) {
+                setCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }}
+            className="text-xs text-red-400 hover:text-red-600 underline"
+          >
+            Clear all CSV
+          </button>
+        </div>
         <p className="text-sm text-gray-400">Upload any CSV export — the AI will detect the columns automatically.</p>
         <div className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
           <input ref={csvRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleCsvUpload} className="hidden" id="csv-upload" />
@@ -238,7 +257,26 @@ export default function ImportPage() {
           </label>
         </div>
         {csvResult && (
-          <p className={`text-sm ${csvResult.startsWith("Error") ? "text-red-500" : "text-green-600"}`}>{csvResult}</p>
+          <div className="flex items-center gap-3">
+            <p className={`text-sm ${csvResult.startsWith("Error") ? "text-red-500" : "text-green-600"}`}>{csvResult}</p>
+            {lastCsvFile && !csvResult.startsWith("Error") && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`Remove all transactions imported from "${lastCsvFile}"?`)) return;
+                  try {
+                    const r = await api.deleteBySourceRef(lastCsvFile);
+                    setCsvResult(`Removed ${r.deleted} transactions from "${lastCsvFile}".`);
+                    setLastCsvFile(null);
+                  } catch (e: unknown) {
+                    setCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+                  }
+                }}
+                className="text-xs text-red-400 hover:text-red-600 underline whitespace-nowrap"
+              >
+                Remove import
+              </button>
+            )}
+          </div>
         )}
       </section>
 

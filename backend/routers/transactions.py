@@ -76,6 +76,25 @@ async def update_transaction(
     return _serialize(t)
 
 
+@router.delete("")
+async def bulk_delete(source_ref: Optional[str] = None, source: Optional[str] = None, db: Session = Depends(get_db)):
+    if not source_ref and not source:
+        raise HTTPException(status_code=400, detail="Provide source_ref or source")
+    q = db.query(Transaction)
+    if source_ref:
+        q = q.filter(Transaction.source_ref == source_ref)
+    if source:
+        q = q.filter(Transaction.source == source)
+    ids = [t.id for t in q.all()]
+    if not ids:
+        raise HTTPException(status_code=404, detail="No transactions found")
+    q.delete()
+    db.commit()
+    for tid in ids:
+        rag.remove_transaction(tid)
+    return {"deleted": len(ids)}
+
+
 @router.delete("/{transaction_id}")
 async def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
     t = db.get(Transaction, transaction_id)
