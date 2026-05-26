@@ -48,7 +48,9 @@ _NON_FINANCIAL_RE = re.compile(
     r"|waiting for payment|awaiting payment|complete your payment|complete your purchase"
     r"|your order is waiting|unpaid order|abandoned cart|don't forget to pay"
     r"|\byou.?ve won\b|\byou won\b|\bcongratulations\b|\breward points\b|\bgift card\b|\bgift voucher\b"
-    r"|\bloyalty points\b|\bcashback reward\b|\bbonus points\b|\bprize\b"
+    r"|\be-?gift\b|\bloyalty points\b|\bcashback reward\b|\bbonus points\b|\bprize\b"
+    r"|lower interest rate|balance transfer|instalment plan offer|credit card offer|cash instalment"
+    r"|offer ends|get started today"
     r"|payment declined|payment unsuccessful|payment failed|transaction declined"
     r"|card declined|could not process|unable to process your payment"
     r"|retry payment|update your payment|billing problem|payment issue|payment attempt"
@@ -245,6 +247,9 @@ async def sync_email_account(
             raise HTTPException(status_code=429, detail=f"Sync cooldown active — try again in {remaining}s")
 
     if reimport:
+        email_ids = [row.id for row in db.query(Transaction.id).filter(Transaction.source == "email").all()]
+        for tid in email_ids:
+            rag.remove_transaction(tid)
         db.query(Transaction).filter(Transaction.source == "email").delete()
         db.commit()
 

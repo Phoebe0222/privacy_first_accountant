@@ -39,7 +39,7 @@ Agent reads the data and identifies:
 
 
 ### 3. Data storage
-Clean structured data stores locally. 
+Clean structured data stores locally, both your transactions and the vectors. 
 
 ### 4. Chat and UI
 The UI has a dashboard with cost and revenue, cash flows etc.
@@ -99,7 +99,7 @@ Vector DB:
 5. LLM answers with retrieved infomation 
 
 - ### extraction
-1. a new transaction
+1. a new transaction (either model generated or user created)
 2. embed the transaction
 3. search for similar transactions
 4. add the similar transactions in the prompt
@@ -152,7 +152,7 @@ Vector DB:
 ## Roadmap
 ### Phase 1
 - transaction ingestion
-- **categorization** -- **this is hard**
+- **categorization** -- **this is important**
 - anomaly detection
 - monthly summaries
 - User define rules from UI

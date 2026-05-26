@@ -102,10 +102,10 @@ EXTRACTION_PROMPT = """Analyse the email text below and decide whether it contai
 First, set "skip" to true if the email is ANY of the following — these are NOT financial transactions:
 - Order dispatched / shipped / out for delivery / delivered / in transit
 - Logistics or tracking update ("view logistics", "track your order", "tracking number", "your parcel is on its way")
-- Payment reminder or pending payment — no money has actually moved yet. Strong signals: "waiting for payment", "awaiting payment", "complete your payment", "complete your purchase", "your order is waiting", "unpaid order", "payment required", "action required", "your cart", "abandoned cart", "don't forget to pay", "pro forma invoice", "on the way"
+- Payment reminder or pending payment — no money has actually moved yet. Strong signals: "waiting for payment", "awaiting payment", "complete your payment", "complete your purchase", "your order is waiting", "unpaid order", "payment required", "your cart", "abandoned cart", "don't forget to pay", "pro forma invoice", "on the way". EXCEPTION: a utility bill, subscription invoice, or supplier bill that includes an account number, bill period, and amount due is a REAL expense — do NOT skip it even though payment is future-dated. "Your gas bill has arrived", "your electricity bill", "your bill is ready", "amount due", "due date" in a bill/invoice context = expense, not a reminder.
 - Declined or failed payment — no money actually moved. ALWAYS skip these regardless of any dollar amount shown. Any of the following means skip=true: "payment declined", "payment unsuccessful", "payment failed", "payment method failed", "rejected", "transaction declined", "card declined", "could not process", "unable to process your payment", "we were unable to charge", "your payment could not be processed", "try again", "update your payment method", "retry payment", "payment issue", "billing problem", "payment attempt failed". RULE: if the email is asking you to fix a payment or retry, no money moved — set skip to true.
 - Winnings, rewards, or gift cards — these are NOT real income. Strong signals: "you've won", "you won", "congratulations", "reward points", "gift card", "gift voucher", "loyalty points", "cashback reward", "bonus points", "prize", "you've been selected". Even if a dollar amount appears, set skip to true.
-- Marketing or promotional email with no actual charge
+- Marketing or promotional email with no actual charge. This includes financial product offers such as credit card balance transfer offers, cash instalment plan offers, loan offers, and "get $X eGift card" incentives — no money has moved, these are invitations to apply or sign up.
 - Account notification with no dollar amount (password reset, login alert, newsletter)
 - General correspondence with no invoice or payment
 
@@ -114,12 +114,14 @@ If "skip" is true, set all other fields to null and stop — do not guess amount
 Otherwise set "skip" to false and extract the transaction details.
 
 Rules for "type" — read carefully:
-- "expense": YOU are paying money OUT. Strong signals: "you've paid", "you sent a payment", "receipt for your payment", "your payment has been received", "payment received", "successfully sent a payment", "bill", "invoice", "amount due", "payment due", "please pay", "your bill has arrived", "order confirmation", "you placed an order"; you are the customer being charged.
-- "income": money is flowing IN to you. Strong signals: "payment received from", "you've been paid", "funds deposited", "payout", "we've sent you", "money has been sent to you"; you are receiving funds FROM someone else.
+- "expense": YOU are paying money OUT. Strong signals: "you've paid", "you sent a payment", "receipt for your payment", "successfully sent a payment", "bill", "invoice", "amount due", "payment due", "please pay", "your bill has arrived", "order confirmation", "you placed an order"; you are the customer being charged.
+- "income": money is flowing IN to you. Strong signals: "payment received from [name]", "you've been paid", "funds deposited", "refund", "payout", "we've sent you", "money has been sent to you"; you are receiving funds FROM someone else.
+- CRITICAL — A REFUND is always "income". "Your refund from [vendor]", "refund of $X", "refund is on the way", "$X will be refunded" all mean money is coming BACK to you — set type to "income". Ignore any mention of the original payment amount.
+- CRITICAL — "payment received" or "we received your payment" means the MERCHANT received money FROM YOU — this is an EXPENSE, not income. Ask: who received the payment? If the merchant/business received it from you, it is an expense.
 - WARNING: "payment" alone does NOT mean income. "Receipt for your payment" and "you've paid [merchant]" are EXPENSES — you are the one who paid.
 - A positive dollar amount does NOT mean income — receipts and invoices always show positive amounts.
 - Utility bills, subscription charges, supplier invoices, and payment receipts where YOU paid are ALWAYS expenses.
-- Subject "Receipt for Your Payment" is ALWAYS an expense.
+- Subject "Receipt for Your Payment" is ALWAYS an expense. "Thank you for your payment" is ALWAYS an expense.
 - Default to "expense" when uncertain.
 
 {vendor_rules_section}{similar_section}Return ONLY a valid JSON object — no explanation, no markdown, no extra text.

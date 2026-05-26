@@ -1,3 +1,8 @@
 accountant.db
+chroma_db/
 .venv/
 data/
+**/__pycache__/
+**/*.pyc
+email.txt
+test_extract.py

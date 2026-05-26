@@ -70,7 +70,7 @@ async def update_transaction(
     db.commit()
     db.refresh(t)
     try:
-        await rag.index_transaction(t)
+        await rag.index_transaction(t) # re-index the transaction in the RAG system to update its vector representation based on the new data
     except Exception:
         pass
     return _serialize(t)

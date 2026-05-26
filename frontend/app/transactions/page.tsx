@@ -220,7 +220,7 @@ export default function TransactionsPage() {
       ) : items.length === 0 ? (
         <p className="text-gray-400">No transactions yet. Import some from the Import page.</p>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
               <tr>
