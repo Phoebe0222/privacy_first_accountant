@@ -6,6 +6,22 @@ import re
 _DATE_RE = re.compile(r"^\d{1,4}[-/]\d{1,2}[-/]\d{2,4}$|^\d{1,2}\s+\w+\s+\d{2,4}$")
 _NUMBER_RE = re.compile(r'^-?\s*["$]?[\d,]+\.?\d*$')
 
+# Descriptions that indicate an internal transfer between the user's own accounts.
+# These should be skipped — the same movement appears as both income and expense
+# across different CSVs and would double-count.
+_TRANSFER_RE = re.compile(
+    r"\bfunds?\s+tfer\b|\bfunds?\s+transfer\b"            # ANZ "FUNDS TFER TRANSFER"
+    r"|\bbpay\b.{0,40}\bcredit\s+card\b"                  # "BPAY MYCARD CREDIT CARD"
+    r"|\bbpay\s+payment\b"                                 # "BPAY PAYMENT - THANK YOU"
+    r"|\bcredit\s+card\s+payment\b"                        # generic CC payment
+    r"|\bcc\s+payment\b|\bcard\s+repayment\b"
+    r"|\binternal\s+transfer\b|\bown\s+transfer\b"
+    r"|\bm-?banking\s+(funds?\s+)?(tfer|transfer)\b"       # ANZ mobile banking transfer
+    r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)\b",
+    re.IGNORECASE,
+)
+_TRANSFER_CATEGORY_RE = re.compile(r"\binternal\s+transfer|\btransfer\s+out\b|\btransfer\s+in\b", re.IGNORECASE)
+
 
 def _looks_like_data_row(row: list[str]) -> bool:
     """Return True if the first row appears to be data rather than headers."""
@@ -79,12 +95,31 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
     type_col = mapping.get("type_col")
     income_types = {v.lower() for v in (mapping.get("income_types") or []) if v}
     expense_types = {v.lower() for v in (mapping.get("expense_types") or []) if v}
-    exclude_types = {v.lower() for v in (mapping.get("exclude_types") or []) if v}
+    raw_exclude = {v.lower() for v in (mapping.get("exclude_types") or []) if v}
+    # Only exclude by type when the file actually uses type-based classification.
+    # If income_types and expense_types are both empty the file is sign-based and
+    # exclude_types would incorrectly drop every row.
+    exclude_types = raw_exclude if (income_types or expense_types) else set()
     status_col = mapping.get("status_col")
     completed_status = (mapping.get("completed_status") or "").lower().strip()
+    # Sanity-check: if completed_status never appears in the actual data, the AI
+    # made a bad mapping (e.g. put a column name as the status value). Disable filter.
+    if status_col and completed_status:
+        if not any(row.get(status_col, "").strip().lower() == completed_status for row in rows):
+            status_col = None
+            completed_status = ""
     credit_col = mapping.get("credit_col")
     debit_col = mapping.get("debit_col")
     amount_col = mapping.get("amount")
+    # If debit/credit cols are mapped but contain no non-zero values, fall back to amount col
+    if credit_col and debit_col:
+        has_values = any(
+            _clean_amount(row.get(credit_col, "")) != 0 or _clean_amount(row.get(debit_col, "")) != 0
+            for row in rows[:20]
+        )
+        if not has_values:
+            credit_col = None
+            debit_col = None
 
     for row in rows:
         def get(field, r=row):
@@ -133,6 +168,12 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
 
         date = get("date") or ""
         vendor = get("vendor") or "Unknown"
+        description = get("description") or vendor
+
+        category_raw = get("category") or ""
+        if (_TRANSFER_RE.search(vendor) or _TRANSFER_RE.search(description)
+                or _TRANSFER_CATEGORY_RE.search(category_raw)):
+            continue
 
         transactions.append({
             "date": _normalise_date(date),
@@ -141,17 +182,33 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
             "tax": round(abs(_clean_amount(get("tax"))), 2),
             "type": tx_type,
             "category": get("category") or "other",
-            "description": (get("description") or vendor)[:500],
+            "description": description[:500],
             "invoice_number": get("invoice_number") or None,
         })
     return transactions
 
+
+_MONTH_ALIASES = {
+    "jan": "Jan", "feb": "Feb", "mar": "Mar", "apr": "Apr",
+    "may": "May", "jun": "Jun", "jul": "Jul", "aug": "Aug",
+    "sept": "Sep", "sep": "Sep", "oct": "Oct", "nov": "Nov", "dec": "Dec",
+    "january": "January", "february": "February", "march": "March",
+    "april": "April", "june": "June", "july": "July", "august": "August",
+    "september": "September", "october": "October", "november": "November",
+    "december": "December",
+}
 
 def _normalise_date(raw: str) -> str:
     from datetime import datetime
     raw = raw.strip()
     # Remove trailing time component (e.g. "2026-04-15 01:23:21" or "2026-04-15T14:00:00")
     raw = re.sub(r"[T ]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$", "", raw).strip()
+    # Canonicalise non-standard month names (e.g. "Sept" → "Sep", "July" → "July")
+    raw = re.sub(
+        r"\b([A-Za-z]+)\b",
+        lambda m: _MONTH_ALIASES.get(m.group(1).lower(), m.group(1)),
+        raw,
+    )
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y",
                 "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
                 "%d %b %y", "%d %B %y",

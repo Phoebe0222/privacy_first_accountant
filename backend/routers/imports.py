@@ -499,7 +499,9 @@ async def upload_csv(file: UploadFile = File(...)):
 async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
     try:
         mapping = await map_csv_columns(headers, rows[:5])
+        log.info("CSV MAPPING | %s", mapping)
         transactions = apply_mapping(rows, mapping)
+        log.info("CSV APPLY | rows=%d  transactions=%d", len(rows), len(transactions))
         if not transactions:
             _jobs[job_id] = {"status": "failed", "error": "No valid transactions found in file."}
             return
@@ -508,12 +510,14 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
         try:
             category_rules = _load_category_rules(db)
 
-            unique_vendors = list({tx["vendor"] for tx in transactions if tx["vendor"]})
-            vendor_categories = await categorize_vendors(unique_vendors, category_rules=category_rules)
+            # Only ask AI to categorize vendors that don't already have a category from the CSV
+            uncategorized_vendors = list({tx["vendor"] for tx in transactions if tx["vendor"] and not tx.get("category") or tx.get("category") == "other"})
+            vendor_categories = await categorize_vendors(uncategorized_vendors, category_rules=category_rules)
 
             added = 0
             for tx in transactions:
-                data = {**tx, "category": vendor_categories.get(tx["vendor"]) or tx["category"] or "other"}
+                csv_category = tx.get("category") or ""
+                data = {**tx, "category": csv_category if csv_category and csv_category != "other" else vendor_categories.get(tx["vendor"]) or "other"}
                 t = _build_transaction(data, source="csv", source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1

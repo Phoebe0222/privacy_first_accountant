@@ -153,6 +153,7 @@ _DATE_FMTS = [
     "%d/%m/%y", "%m/%d/%y",
 ]
 
+# TODO: put this in utility.py, it's used in csv ingestion too
 def _normalise_date(val) -> str | None:
     if not val or not isinstance(val, str):
         return None
@@ -255,27 +256,35 @@ Return a JSON object with these keys:
   "income_types":     ["<exact type_col values that mean money IN — e.g. Sale, Deposit, Payment Received>"],
   "expense_types":    ["<exact type_col values that mean money OUT — e.g. Fee, GST, Shipping, Charge>"],
   "exclude_types":    ["<exact type_col values that are noise/duplicates to skip — e.g. General Authorisation, General Credit Card Deposit, Pending>"],
-  "status_col":       "<column name for transaction status, or null>",
-  "completed_status": "<exact status value that means settled/completed, or null>",
+  "status_col":       "<column whose values distinguish PENDING from COMPLETED/SETTLED — e.g. 'Status', 'State'. Must NOT be a column that describes HOW the transaction was made (e.g. 'Transaction Type', 'Method', 'Type'). Set null if no such column exists>",
+  "completed_status": "<exact value in status_col that means the transaction settled — e.g. 'Completed', 'Cleared', 'Posted'. null if status_col is null>",
   "debit_col":        "<column for debit/withdrawal amounts if separate, else null>",
   "credit_col":       "<column for credit/deposit amounts if separate, else null>",
   "tax":              "<column for fee or tax amount, or null>",
-  "description":      "<secondary detail column, or null>",
-  "invoice_number":   "<column for order/invoice/transaction ID, or null>"
+  "category":         "<column containing a human-readable spend category like 'Groceries', 'Transport', etc., or null>",
+  "description":      "<secondary detail column with narrative or memo text, or null>",
+  "invoice_number":   "<column for a per-transaction order or invoice reference (e.g. Order #, Invoice #, Confirmation #) — NOT an account number, card number, or customer ID. null if no such column>"
 }}
 
 Rules:
-- If income vs expense is determined by sign (negative = expense, positive = income), set type_col to null.
+- If income vs expense is determined by sign (negative = expense, positive = income), set type_col to null AND set income_types, expense_types, exclude_types all to []. Do NOT put transaction type labels like "MISCELLANEOUS DEBIT" or "CREDIT CARD PURCHASE" into exclude_types for sign-based files — they are not noise, they are the transactions.
+- Only set type_col when distinct column values explicitly distinguish income rows from expense rows (e.g. "Sale" vs "Refund", "Credit" vs "Debit").
 - If there are separate debit and credit columns, set debit_col/credit_col and set amount to null.
 - Prefer Net or Total over a gross Amount column.
 - All string values in income_types, expense_types, exclude_types must be EXACT values from the sample rows.
 - For PayPal: exclude_types should include "General Authorisation" and "General Credit Card Deposit".
+- status_col must only be set when the column explicitly tracks settlement state. A column named "Transaction Type", "Type", or "Method" is NOT a status column — set status_col to null.
+- invoice_number must only be set when the column contains a unique per-transaction reference. A column named "Account Number", "Account", "Card", or "Customer ID" is NOT an invoice number — set invoice_number to null.
 - Return ONLY the JSON object, no explanation.
 
 CSV headers: {headers}
 
 Sample rows:
 {sample}"""
+
+
+_COL_FIELDS = {"date", "vendor", "amount", "type_col", "status_col", "debit_col", "credit_col", "tax", "category", "description", "invoice_number"}
+_LIST_FIELDS = {"income_types", "expense_types", "exclude_types"}
 
 
 async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
@@ -289,12 +298,46 @@ async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
     raw = await _ollama_generate(prompt)
     mapping = _parse_json(raw)
     header_map = {h.lower().strip(): h for h in headers}
+
+    # Collect all values that actually appear in sample data (for list field validation)
+    all_data_values: set[str] = set()
+    for row in sample_rows[:20]:
+        for v in row.values():
+            if v and v != "--":
+                all_data_values.add(v.strip().lower())
+
+    # Resolve column names case-insensitively, and validate list fields against actual data values. Convert "null" strings to None.
     resolved = {}
     for field, val in mapping.items():
-        if val and isinstance(val, str):
-            resolved[field] = header_map.get(val.lower().strip(), val)
+        if field in _COL_FIELDS:
+            # String "null" → None
+            if isinstance(val, str) and val.strip().lower() == "null":
+                resolved[field] = None
+            elif val and isinstance(val, str):
+                # Resolve case-insensitively; if not a real header, drop it
+                resolved[field] = header_map.get(val.lower().strip())
+            else:
+                resolved[field] = None
+        elif field in _LIST_FIELDS:
+            if not isinstance(val, list):
+                resolved[field] = []
+            else:
+                # Keep only values that actually appear in the sample data
+                resolved[field] = [v for v in val if isinstance(v, str) and v.strip().lower() in all_data_values]
         else:
             resolved[field] = val
+
+    # Guard: status_col must not be a transaction-type/method column
+    _STATUS_COL_BLOCKLIST = re.compile(r"\btype\b|\bmethod\b|\bmode\b", re.IGNORECASE)
+    if resolved.get("status_col") and _STATUS_COL_BLOCKLIST.search(resolved["status_col"]):
+        resolved["status_col"] = None
+        resolved["completed_status"] = None
+
+    # Guard: invoice_number must not be an account/card/customer identifier column
+    _INVOICE_COL_BLOCKLIST = re.compile(r"\baccount\b|\bcard\b|\bcustomer\b|\bclient\b|\buser\b", re.IGNORECASE)
+    if resolved.get("invoice_number") and _INVOICE_COL_BLOCKLIST.search(resolved["invoice_number"]):
+        resolved["invoice_number"] = None
+
     return resolved
 
 

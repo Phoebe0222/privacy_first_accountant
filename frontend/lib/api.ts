@@ -36,7 +36,7 @@ export interface Summary {
 export const api = {
   getSummary: () => req<Summary>("/transactions/summary"),
 
-  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; vendor?: string }) => {
+  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; vendor?: string; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
     const defined = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );

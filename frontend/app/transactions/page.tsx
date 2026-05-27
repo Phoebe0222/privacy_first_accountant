@@ -44,37 +44,36 @@ export default function TransactionsPage() {
   const [vendor, setVendor] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense" });
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
-  function load() {
+  function load(p = page, col = sortCol, dir = sortDir) {
     setLoading(true);
     const fy = FY_OPTIONS.find((o) => o.value === dateRange);
     const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
     const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
     api
-      .getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, vendor: vendor || undefined })
+      .getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, vendor: vendor || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE })
       .then(({ items, total }) => { setItems(items); setTotal(total); })
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => { load(); }, [type, category, dateRange, customFrom, customTo, source, vendor]);
+  function resetAndLoad() { setPage(1); load(1); }
+
+  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor]);
+  useEffect(() => { load(page); }, [page]);
+  useEffect(() => { setPage(1); load(1, sortCol, sortDir); }, [sortCol, sortDir]);
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this transaction?")) return;
     await api.deleteTransaction(id);
-    load();
+    load(page);
   }
 
   function handleSort(col: keyof Transaction) {
     if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortCol(col); setSortDir("asc"); }
   }
-
-  const sorted = [...items].sort((a, b) => {
-    const av = a[sortCol] ?? "";
-    const bv = b[sortCol] ?? "";
-    const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
-    return sortDir === "asc" ? cmp : -cmp;
-  });
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -107,7 +106,7 @@ export default function TransactionsPage() {
       type: editForm.type,
     });
     setEditingId(null);
-    load();
+    load(page);
   }
 
   return (
@@ -239,7 +238,7 @@ export default function TransactionsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {sorted.map((t) => {
+              {items.map((t) => {
                 const editing = editingId === t.id;
                 return (
                   <tr key={t.id} className={`transition-colors ${editing ? "bg-blue-50" : "hover:bg-gray-50"}`}>
@@ -342,6 +341,28 @@ export default function TransactionsPage() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-between text-sm text-gray-500">
+          <span>Page {page} of {Math.ceil(total / PAGE_SIZE)}</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ← Prev
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(Math.ceil(total / PAGE_SIZE), p + 1))}
+              disabled={page >= Math.ceil(total / PAGE_SIZE)}
+              className="px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next →
+            </button>
+          </div>
         </div>
       )}
     </div>

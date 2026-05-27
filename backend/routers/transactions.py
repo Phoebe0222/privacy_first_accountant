@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, asc, desc
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
@@ -12,6 +12,8 @@ from backend.services import rag
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+SORTABLE_COLUMNS = {"date", "vendor", "category", "type", "source", "amount", "tax"}
+
 @router.get("")
 def list_transactions(
     type: Optional[str] = None,
@@ -21,6 +23,8 @@ def list_transactions(
     date_to: Optional[str] = None,
     source: Optional[str] = None,
     vendor: Optional[str] = None,
+    sort_by: str = "date",
+    sort_dir: str = "desc",
     limit: int = 200,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -41,7 +45,9 @@ def list_transactions(
     if vendor:
         q = q.filter(Transaction.vendor.ilike(f"%{vendor}%"))
     total = q.count()
-    items = q.order_by(Transaction.date.desc()).offset(offset).limit(limit).all()
+    col = getattr(Transaction, sort_by if sort_by in SORTABLE_COLUMNS else "date")
+    order = desc(col) if sort_dir == "desc" else asc(col)
+    items = q.order_by(order).offset(offset).limit(limit).all()
     return {"total": total, "items": [_serialize(t) for t in items]}
 
 
@@ -80,18 +86,20 @@ async def update_transaction(
 async def bulk_delete(source_ref: Optional[str] = None, source: Optional[str] = None, db: Session = Depends(get_db)):
     if not source_ref and not source:
         raise HTTPException(status_code=400, detail="Provide source_ref or source")
-    q = db.query(Transaction)
+    q = db.query(Transaction.id)
     if source_ref:
         q = q.filter(Transaction.source_ref == source_ref)
     if source:
         q = q.filter(Transaction.source == source)
-    ids = [t.id for t in q.all()]
+    ids = [row.id for row in q.all()]
     if not ids:
         raise HTTPException(status_code=404, detail="No transactions found")
-    q.delete()
+    db.query(Transaction).filter(Transaction.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
-    for tid in ids:
-        rag.remove_transaction(tid)
+    # Batch-delete from ChromaDB in a thread so we don't block the event loop
+    import asyncio
+    str_ids = [str(i) for i in ids]
+    await asyncio.get_event_loop().run_in_executor(None, lambda: rag._col.delete(ids=str_ids))
     return {"deleted": len(ids)}
 
 
