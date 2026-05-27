@@ -6,3 +6,5 @@ data/
 **/*.pyc
 email.txt
 test_extract.py
+test_csv.py
+*.csv

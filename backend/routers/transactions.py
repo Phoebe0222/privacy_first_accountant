@@ -106,6 +106,36 @@ async def delete_transaction(transaction_id: int, db: Session = Depends(get_db))
     return {"ok": True}
 
 
+@router.get("/imports")
+def list_imports(db: Session = Depends(get_db)):
+    rows = (
+        db.query(
+            Transaction.source,
+            Transaction.source_ref,
+            func.count(Transaction.id).label("count"),
+            func.min(Transaction.date).label("date_from"),
+            func.max(Transaction.date).label("date_to"),
+            func.max(Transaction.created_at).label("imported_at"),
+        )
+        .filter(Transaction.source.in_(["csv", "pdf", "image"]))
+        .filter(Transaction.source_ref.isnot(None))
+        .group_by(Transaction.source, Transaction.source_ref)
+        .order_by(func.max(Transaction.created_at).desc())
+        .all()
+    )
+    return [
+        {
+            "source": r.source,
+            "source_ref": r.source_ref,
+            "count": r.count,
+            "date_from": r.date_from,
+            "date_to": r.date_to,
+            "imported_at": r.imported_at.isoformat() if r.imported_at else None,
+        }
+        for r in rows
+    ]
+
+
 @router.get("/summary")
 def summary(db: Session = Depends(get_db)):
     total_income = db.query(func.sum(Transaction.amount)).filter(Transaction.type == "income").scalar() or 0

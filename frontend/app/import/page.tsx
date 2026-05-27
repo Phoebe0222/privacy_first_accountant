@@ -39,6 +39,11 @@ export default function ImportPage() {
   const [csvUploading, setCsvUploading] = useState(false);
   const [csvResult, setCsvResult] = useState<string>("");
   const [lastCsvFile, setLastCsvFile] = useState<string | null>(null);
+  const [importHistory, setImportHistory] = useState<{ source: string; source_ref: string; count: number; date_from: string; date_to: string; imported_at: string }[]>([]);
+
+  function loadImportHistory() {
+    api.getImportHistory().then(setImportHistory).catch(() => {});
+  }
 
   function loadAccounts() {
     api.getEmailAccounts().then(setAccounts).catch(() => {});
@@ -59,6 +64,7 @@ export default function ImportPage() {
 
   useEffect(() => {
     loadAccounts();
+    loadImportHistory();
     const saved = getSavedJobs();
     for (const [idStr, { jobId, reimport }] of Object.entries(saved)) {
       const id = Number(idStr);
@@ -100,6 +106,7 @@ export default function ImportPage() {
       const r = await api.uploadCsv(file);
       setCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
       setLastCsvFile(r.filename);
+      loadImportHistory();
     } catch (err: unknown) {
       setCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -279,6 +286,45 @@ export default function ImportPage() {
           </div>
         )}
       </section>
+
+      {importHistory.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-500">Import History</h4>
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-50">
+                {importHistory.map((h) => (
+                  <tr key={h.source_ref} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-700 truncate max-w-xs">{h.source_ref}</p>
+                      <p className="text-xs text-gray-400">{h.date_from} — {h.date_to}</p>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 text-xs capitalize">{h.source}</td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">{h.count} transactions</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Remove all ${h.count} transactions from "${h.source_ref}"?`)) return;
+                          try {
+                            const r = await api.deleteBySourceRef(h.source_ref);
+                            setCsvResult(`Removed ${r.deleted} transactions from "${h.source_ref}".`);
+                            loadImportHistory();
+                          } catch (e: unknown) {
+                            setCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+                          }
+                        }}
+                        className="text-xs text-gray-300 hover:text-red-500 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* File upload */}
       <section className="space-y-4">

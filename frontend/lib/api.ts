@@ -67,6 +67,9 @@ export const api = {
   deleteBySource: (source: string) =>
     req<{ deleted: number }>(`/transactions?source=${encodeURIComponent(source)}`, { method: "DELETE" }),
 
+  getImportHistory: () =>
+    req<{ source: string; source_ref: string; count: number; date_from: string; date_to: string; imported_at: string }[]>("/transactions/imports"),
+
   // ── Import ──────────────────────────────────────────────────────────────
 
   getEmailAccounts: () => req<EmailAccount[]>("/import/email-accounts"),

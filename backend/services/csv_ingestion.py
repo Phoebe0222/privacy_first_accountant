@@ -150,8 +150,8 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
 def _normalise_date(raw: str) -> str:
     from datetime import datetime
     raw = raw.strip()
-    # Strip time component if present (e.g. "2026-04-15 01:23:21" → "2026-04-15")
-    raw = raw.split(" ")[0].split("T")[0]
+    # Remove trailing time component (e.g. "2026-04-15 01:23:21" or "2026-04-15T14:00:00")
+    raw = re.sub(r"[T ]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$", "", raw).strip()
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y",
                 "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
                 "%d %b %y", "%d %B %y",
