@@ -23,7 +23,7 @@ from backend.services.pdf_ingestion import (
     normalise_image,
 )
 from backend.services.csv_ingestion import parse_csv, apply_mapping
-from backend.services.vendor_rules import BUILT_IN_RULES  # noqa: F401 (used via _load_category_rules)
+from backend.services.vendor_rules import BUILT_IN_RULES, INCOME_CATEGORIES  # noqa: F401
 from backend.models import VendorRule
 
 _IMAGE_MIMES = {"image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
@@ -153,13 +153,19 @@ def _build_transaction(
     is_anomaly = bool(data.get("anomaly"))
     if is_anomaly:
         log.warning("ANOMALY | %s | %s | reason: %s", data.get("vendor"), data.get("amount"), data.get("anomaly_reason"))
+    tx_type = data.get("type") or "expense"
+    raw_category = data.get("category") or "other"
+    if tx_type == "income" and raw_category not in INCOME_CATEGORIES:
+        raw_category = "revenue"
+    elif tx_type == "expense" and raw_category in INCOME_CATEGORIES:
+        raw_category = "other"
     return Transaction(
         date=data.get("date") or fallback_date,
         vendor=data.get("vendor") or fallback_vendor or "",
         amount=_to_float(data.get("amount")),
         tax=_to_float(data.get("tax")),
-        category=data.get("category") or "other",
-        type=data.get("type") or "expense",
+        category=raw_category,
+        type=tx_type,
         source=source,
         source_ref=source_ref,
         description=data.get("description") or fallback_description,
@@ -441,41 +447,49 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
     filename = file.filename or ""
     file_bytes = await file.read()
 
-    if is_pdf_file(filename):
-        raw_text = extract_text_from_pdf(file_bytes)
-        source = "pdf"
-    elif is_image_file(filename):
-        image_bytes = normalise_image(file_bytes)
-        raw_text = await extract_from_image(image_bytes)
-        source = "image"
-    else:
+    if not is_pdf_file(filename) and not is_image_file(filename):
         raise HTTPException(status_code=400, detail="Unsupported file type. Upload a PDF or image.")
 
-    if not raw_text.strip():
-        raise HTTPException(status_code=422, detail="Could not extract text from file.")
-
     category_rules = _load_category_rules(db)
-    data = await _run_ai_extraction(raw_text, filename, category_rules)
-    if not _to_float(data.get("amount")):
-        raise HTTPException(status_code=422, detail="Could not extract a non-zero amount from file.")
-    t = _build_transaction(data, source=source, source_ref=filename, raw_text=raw_text)
-    db.add(t)
-    db.commit()
-    db.refresh(t)
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "running"}
+    asyncio.create_task(_run_file_extraction(job_id, file_bytes, filename, category_rules))
+    return {"job_id": job_id, "status": "running"}
 
-    asyncio.create_task(_index_transactions([t.id]))
 
-    return {
-        "transaction": {
-            "id": t.id,
-            "date": t.date,
-            "vendor": t.vendor,
-            "amount": t.amount,
-            "tax": t.tax,
-            "category": t.category,
-            "type": t.type,
-        }
-    }
+async def _run_file_extraction(job_id: str, file_bytes: bytes, filename: str, category_rules: list):
+    try:
+        if is_pdf_file(filename):
+            raw_text = extract_text_from_pdf(file_bytes)
+            source = "pdf"
+        else:
+            raw_text = await extract_from_image(normalise_image(file_bytes))
+            source = "image"
+
+        if not raw_text.strip():
+            _jobs[job_id] = {"status": "failed", "error": "Could not extract text from file."}
+            return
+
+        data = await _run_ai_extraction(raw_text, filename, category_rules)
+        if not _to_float(data.get("amount")):
+            _jobs[job_id] = {"status": "failed", "error": "Could not extract a non-zero amount from file."}
+            return
+
+        db = SessionLocal()
+        try:
+            t = _build_transaction(data, source=source, source_ref=filename, raw_text=raw_text)
+            db.add(t)
+            db.commit()
+            db.refresh(t)
+            transaction = {"id": t.id, "date": t.date, "vendor": t.vendor,
+                           "amount": t.amount, "tax": t.tax, "category": t.category, "type": t.type}
+        finally:
+            db.close()
+
+        asyncio.create_task(_index_transactions([transaction["id"]]))
+        _jobs[job_id] = {"status": "done", "added": 1, "skipped": 0, "transaction": transaction}
+    except Exception as e:
+        _jobs[job_id] = {"status": "failed", "error": str(e)}
 
 # --- csv -----------------------
 @router.post("/csv")
@@ -510,14 +524,29 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
         try:
             category_rules = _load_category_rules(db)
 
-            # Only ask AI to categorize vendors that don't already have a category from the CSV
-            uncategorized_vendors = list({tx["vendor"] for tx in transactions if tx["vendor"] and not tx.get("category") or tx.get("category") == "other"})
-            vendor_categories = await categorize_vendors(uncategorized_vendors, category_rules=category_rules)
+            # Ask AI to categorize: real vendor names without a CSV category, plus
+            # descriptions for rows where the vendor is Unknown.
+            to_categorize = set()
+            for tx in transactions:
+                csv_category = tx.get("category") or ""
+                if csv_category and csv_category != "other":
+                    continue
+                if tx["vendor"] != "Unknown":
+                    to_categorize.add(tx["vendor"])
+                elif tx.get("description"):
+                    to_categorize.add(tx["description"]) # some statements put the vendor name in the description column, so use that as a fallback if vendor is Unknown
+            vendor_categories = await categorize_vendors(list(to_categorize), category_rules=category_rules)
 
             added = 0
             for tx in transactions:
                 csv_category = tx.get("category") or ""
-                data = {**tx, "category": csv_category if csv_category and csv_category != "other" else vendor_categories.get(tx["vendor"]) or "other"}
+                if csv_category and csv_category != "other":
+                    category = csv_category
+                elif tx["vendor"] != "Unknown":
+                    category = vendor_categories.get(tx["vendor"]) or "other"
+                else:
+                    category = vendor_categories.get(tx.get("description", "")) or "other"
+                data = {**tx, "category": category}
                 t = _build_transaction(data, source="csv", source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1

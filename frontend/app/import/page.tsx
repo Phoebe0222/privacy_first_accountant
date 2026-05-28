@@ -23,6 +23,32 @@ function removeJob(id: number) {
   localStorage.setItem(SYNC_JOBS_KEY, JSON.stringify(jobs));
 }
 
+const CSV_JOB_KEY = "pa_csv_job";
+type SavedCsvJob = { jobId: string; filename: string };
+
+function getSavedCsvJob(): SavedCsvJob | null {
+  try { return JSON.parse(localStorage.getItem(CSV_JOB_KEY) || "null"); }
+  catch { return null; }
+}
+function persistCsvJob(jobId: string, filename: string) {
+  localStorage.setItem(CSV_JOB_KEY, JSON.stringify({ jobId, filename }));
+}
+function removeCsvJob() {
+  localStorage.removeItem(CSV_JOB_KEY);
+}
+
+const FILE_JOB_KEY = "pa_file_job";
+
+function getSavedFileJob(): string | null {
+  return localStorage.getItem(FILE_JOB_KEY);
+}
+function persistFileJob(jobId: string) {
+  localStorage.setItem(FILE_JOB_KEY, jobId);
+}
+function removeFileJob() {
+  localStorage.removeItem(FILE_JOB_KEY);
+}
+
 export default function ImportPage() {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
   const [showForm, setShowForm] = useState(false);
@@ -62,6 +88,34 @@ export default function ImportPage() {
     }
   }
 
+  async function resumeCsvJob(jobId: string, filename: string) {
+    setCsvUploading(true);
+    setLastCsvFile(filename);
+    try {
+      const r = await api.pollJob(jobId);
+      setCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
+      loadImportHistory();
+    } catch (e: unknown) {
+      setCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCsvUploading(false);
+      removeCsvJob();
+    }
+  }
+
+  async function resumeFileJob(jobId: string) {
+    setUploading(true);
+    try {
+      const t = await api.pollFileJob(jobId);
+      setUploadResult(`Extracted: ${t.vendor} — ${t.type} of $${t.amount} on ${t.date} (${t.category})`);
+    } catch (e: unknown) {
+      setUploadResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setUploading(false);
+      removeFileJob();
+    }
+  }
+
   useEffect(() => {
     loadAccounts();
     loadImportHistory();
@@ -71,6 +125,10 @@ export default function ImportPage() {
       reimport ? setReimporting(id) : setSyncing(id);
       resumePolling(id, jobId, reimport);
     }
+    const csvJob = getSavedCsvJob();
+    if (csvJob) resumeCsvJob(csvJob.jobId, csvJob.filename);
+    const fileJobId = getSavedFileJob();
+    if (fileJobId) resumeFileJob(fileJobId);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleAddAccount(e: React.FormEvent) {
@@ -100,35 +158,56 @@ export default function ImportPage() {
   async function handleCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (csvRef.current) csvRef.current.value = "";
     setCsvUploading(true);
     setCsvResult("");
+    setLastCsvFile(file.name);
+    let jobId: string;
     try {
-      const r = await api.uploadCsv(file);
+      const res = await api.startCsvUpload(file);
+      jobId = res.job_id;
+    } catch (err: unknown) {
+      setCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setCsvUploading(false);
+      return;
+    }
+    persistCsvJob(jobId, file.name);
+    try {
+      const r = await api.pollJob(jobId);
       setCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
-      setLastCsvFile(r.filename);
       loadImportHistory();
     } catch (err: unknown) {
       setCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setCsvUploading(false);
-      if (csvRef.current) csvRef.current.value = "";
+      removeCsvJob();
     }
   }
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (fileRef.current) fileRef.current.value = "";
     setUploading(true);
     setUploadResult("");
+    let jobId: string;
     try {
-      const r = await api.uploadFile(file);
-      const t = r.transaction;
+      const res = await api.startFileUpload(file);
+      jobId = res.job_id;
+    } catch (err: unknown) {
+      setUploadResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setUploading(false);
+      return;
+    }
+    persistFileJob(jobId);
+    try {
+      const t = await api.pollFileJob(jobId);
       setUploadResult(`Extracted: ${t.vendor} — ${t.type} of $${t.amount} on ${t.date} (${t.category})`);
     } catch (err: unknown) {
       setUploadResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      removeFileJob();
     }
   }
 

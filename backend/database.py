@@ -1,8 +1,10 @@
 import os
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./accountant.db")
+_DATA_DIR = Path(__file__).parent.parent / "data"
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{_DATA_DIR / 'accountant.db'}")
 
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

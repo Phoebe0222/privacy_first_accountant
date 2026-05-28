@@ -1,7 +1,10 @@
 VALID_CATEGORIES = frozenset({
     "food", "grocery", "transport", "travel", "utilities", "software", "marketing",
-    "revenue", "salary", "office", "subscription", "shopping", "leisure", "material", "other",
+    "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure",
+    "material", "fee", "cafe", "gym", "medical", "other",
 })
+
+INCOME_CATEGORIES = frozenset({"salary", "revenue", "refund"})
 # these are built-in rules, which will be overridden by user-defined rules if there are any conflicts.
 # They are used as a fallback for categorisation when no user-defined rules match, and also to provide examples of how rules can be defined.
 # Sorted longest-first so more specific patterns win (e.g. "uber eats" before "uber")

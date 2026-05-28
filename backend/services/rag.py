@@ -3,7 +3,7 @@ import os
 import chromadb
 from pathlib import Path
 
-CHROMA_PATH = os.getenv("CHROMA_PATH", str(Path(__file__).parent.parent.parent / "chroma_db"))
+CHROMA_PATH = os.getenv("CHROMA_PATH", str(Path(__file__).parent.parent.parent / "data" / "chroma_db"))
 EMBED_MODEL = "nomic-embed-text"
 OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
 COLLECTION_NAME = "transactions"

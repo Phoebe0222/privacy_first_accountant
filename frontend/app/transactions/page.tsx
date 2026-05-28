@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api, Transaction } from "@/lib/api";
 
-const CATEGORIES = ["all", "food", "grocery", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "office", "subscription", "shopping", "leisure", "material", "other"];
+const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 const FORM_CATEGORIES = CATEGORIES.filter((c) => c !== "all");
 const EMPTY_FORM = { date: "", vendor: "", amount: "", tax: "", category: "other", type: "expense" as "income" | "expense", description: "" };
 
@@ -43,7 +43,7 @@ export default function TransactionsPage() {
   const [source, setSource] = useState("");
   const [vendor, setVendor] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense" });
+  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense", description: "" });
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
@@ -94,7 +94,7 @@ export default function TransactionsPage() {
 
   function startEdit(t: Transaction) {
     setEditingId(t.id);
-    setEditForm({ vendor: t.vendor, category: t.category, amount: String(t.amount), tax: String(t.tax), type: t.type });
+    setEditForm({ vendor: t.vendor, category: t.category, amount: String(t.amount), tax: String(t.tax), type: t.type, description: t.description ?? "" });
   }
 
   async function saveEdit(id: number) {
@@ -104,6 +104,7 @@ export default function TransactionsPage() {
       amount: parseFloat(editForm.amount) || 0,
       tax: parseFloat(editForm.tax) || 0,
       type: editForm.type,
+      description: editForm.description,
     });
     setEditingId(null);
     load(page);
@@ -228,6 +229,7 @@ export default function TransactionsPage() {
                     {col}{sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                   </th>
                 ))}
+                <th className="px-4 py-3 text-left text-gray-500">description</th>
                 <th className="px-4 py-3 text-right cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort("amount")}>
                   Amount{sortCol === "amount" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                 </th>
@@ -253,10 +255,7 @@ export default function TransactionsPage() {
                           autoFocus
                         />
                       ) : (
-                        <>
-                          <span className="font-medium text-gray-800">{t.vendor}</span>
-                          {t.description && <p className="text-xs text-gray-400 mt-0.5 truncate max-w-xs">{t.description}</p>}
-                        </>
+                        <span className="font-medium text-gray-800">{t.vendor}</span>
                       )}
                     </td>
 
@@ -292,6 +291,18 @@ export default function TransactionsPage() {
                     </td>
 
                     <td className="px-4 py-3 text-gray-400 capitalize">{t.source}</td>
+
+                    <td className="px-4 py-3 text-gray-500 max-w-xs">
+                      {editing ? (
+                        <input
+                          value={editForm.description}
+                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                          className="w-full border border-blue-300 rounded px-2 py-1 text-sm"
+                        />
+                      ) : (
+                        <span className="text-xs truncate block">{t.description ?? ""}</span>
+                      )}
+                    </td>
 
                     <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
                       {editing ? (

@@ -98,21 +98,27 @@ export const api = {
     }
   },
 
-  uploadFile: (file: File) => {
+  startFileUpload: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    return req<{ transaction: Partial<Transaction> }>("/import/file", {
-      method: "POST",
-      body: form,
-    });
+    return req<{ job_id: string }>("/import/file", { method: "POST", body: form });
   },
 
-  uploadCsv: async (file: File) => {
+  pollFileJob: async (jobId: string): Promise<{ vendor: string; type: string; amount: number; date: string; category: string }> => {
+    while (true) {
+      const job = await req<{ status: string; transaction?: { vendor: string; type: string; amount: number; date: string; category: string }; error?: string }>(
+        `/import/jobs/${jobId}`
+      );
+      if (job.status === "done" && job.transaction) return job.transaction;
+      if (job.status === "failed") throw new Error(job.error ?? "File processing failed");
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  },
+
+  startCsvUpload: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const { job_id } = await req<{ job_id: string }>("/import/csv", { method: "POST", body: form });
-    const result = await api.pollJob(job_id);
-    return { ...result, filename: file.name };
+    return req<{ job_id: string }>("/import/csv", { method: "POST", body: form });
   },
 
   // ── Vendor rules ────────────────────────────────────────────────────────

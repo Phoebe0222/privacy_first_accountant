@@ -42,26 +42,22 @@ def _parse_json(raw: str) -> dict:
     raise ValueError(f"Incomplete JSON in model response: {raw[:200]}")
 
 
-async def _ollama_generate(prompt: str, retries: int = 3) -> str:
+async def _ollama_generate(prompt: str, retries: int = 3, force_json: bool = False) -> str:
     last_err = None
+    payload = {"model": EXTRACT_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0}}
+    if force_json:
+        payload["format"] = "json"
     for attempt in range(retries):
         try:
             async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{OLLAMA_BASE}/api/generate",
-                    json={"model": EXTRACT_MODEL, "prompt": prompt, "stream": False},
-                )
+                resp = await client.post(f"{OLLAMA_BASE}/api/generate", json=payload)
                 if resp.status_code == 404:
-                    # Model not loaded — pull it then retry
                     await client.post(
                         f"{OLLAMA_BASE}/api/pull",
                         json={"name": EXTRACT_MODEL, "stream": False},
                         timeout=300,
                     )
-                    resp = await client.post(
-                        f"{OLLAMA_BASE}/api/generate",
-                        json={"model": EXTRACT_MODEL, "prompt": prompt, "stream": False},
-                    )
+                    resp = await client.post(f"{OLLAMA_BASE}/api/generate", json=payload)
                 resp.raise_for_status()
                 return resp.json()["response"]
         except Exception as e:
@@ -135,7 +131,7 @@ JSON format:
   "vendor": "company or person name",
   "amount": 0.00,
   "tax": 0.00,
-  "category": "one of: food, grocery, transport, travel, utilities, software, marketing, revenue, salary, office, subscription, shopping, leisure, material, other",
+  "category": "one of: food, grocery, cafe, transport, travel, utilities, software, marketing, fee, gym, medical, office, subscription, shopping, leisure, material, other — OR if type is income: salary, revenue, refund",
   "type": "expense or income — see rules above",
   "description": "one-line summary",
   "invoice_number": "order number, invoice number, reference number, transaction ID, or null — look for labels like Order #, Invoice #, Ref, Transaction ID, Order ID, Confirmation #",
@@ -180,7 +176,7 @@ async def extract_from_text(
         vendor_rules_section=vendor_rules_section,
         similar_section=similar_section,
     )
-    raw = await _ollama_generate(prompt)
+    raw = await _ollama_generate(prompt, force_json=True)
     data = _parse_json(raw)
     data["date"] = _normalise_date(data.get("date"))
     data.setdefault("tax", 0.0)
@@ -212,7 +208,8 @@ async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") 
 
 CATEGORIZE_VENDORS_PROMPT = """Categorise each vendor name below into exactly one category.
 
-Valid categories: food, grocery, transport, travel, utilities, software, marketing, revenue, salary, office, subscription, shopping, leisure, material, other
+Valid categories: food, grocery, cafe, transport, travel, utilities, software, marketing, fee, gym, medical, office, subscription, shopping, leisure, material, other, revenue, salary, refund
+Use salary/revenue/refund only for income transactions. Use all other categories only for expenses.
 
 {vendor_rules_section}Vendors to categorise:
 {vendors}
@@ -236,7 +233,7 @@ async def categorize_vendors(
         vendor_rules_section=vendor_rules_section,
         vendors=safe_vendors,
     )
-    raw = await _ollama_generate(prompt)
+    raw = await _ollama_generate(prompt, force_json=True)
     return _parse_json(raw)
 
 
@@ -262,12 +259,13 @@ Return a JSON object with these keys:
   "credit_col":       "<column for credit/deposit amounts if separate, else null>",
   "tax":              "<column for fee or tax amount, or null>",
   "category":         "<column containing a human-readable spend category like 'Groceries', 'Transport', etc., or null>",
-  "description":      "<secondary detail column with narrative or memo text, or null>",
+  "description":      "<secondary detail column with narrative or memo text - e.g. 'Transaction Details', 'Notes', or null>",
   "invoice_number":   "<column for a per-transaction order or invoice reference (e.g. Order #, Invoice #, Confirmation #) — NOT an account number, card number, or customer ID. null if no such column>"
 }}
 
 Rules:
 - If income vs expense is determined by sign (negative = expense, positive = income), set type_col to null AND set income_types, expense_types, exclude_types all to []. Do NOT put transaction type labels like "MISCELLANEOUS DEBIT" or "CREDIT CARD PURCHASE" into exclude_types for sign-based files — they are not noise, they are the transactions.
+- type_col must ONLY be set when the column contains SHORT, UNIFORM labels that classify every row as income or expense (e.g. "Credit"/"Debit", "Sale"/"Refund"). A column with long narrative text like "PAYMENT TO BUPA AUSTRALIA" or "CREDIT CARD PURCHASE AT WOOLWORTHS" is a vendor/description column, NOT type_col — set type_col to null.
 - Only set type_col when distinct column values explicitly distinguish income rows from expense rows (e.g. "Sale" vs "Refund", "Credit" vs "Debit").
 - If there are separate debit and credit columns, set debit_col/credit_col and set amount to null.
 - Prefer Net or Total over a gross Amount column.
@@ -275,7 +273,19 @@ Rules:
 - For PayPal: exclude_types should include "General Authorisation" and "General Credit Card Deposit".
 - status_col must only be set when the column explicitly tracks settlement state. A column named "Transaction Type", "Type", or "Method" is NOT a status column — set status_col to null.
 - invoice_number must only be set when the column contains a unique per-transaction reference. A column named "Account Number", "Account", "Card", or "Customer ID" is NOT an invoice number — set invoice_number to null.
+- vendor must be the column with the most useful, non-empty merchant or payee name. Never map vendor to a column that is empty or nearly empty in the sample rows.
 - Return ONLY the JSON object, no explanation.
+
+Example — headerless sign-based bank export:
+Headers: "col_0", "col_1", "col_2", "col_3"
+Sample rows:
+col_0: "21/05/2026", col_1: "-102.77", col_2: "PAYMENT TO BUPA AUSTRALIA 456999560000053000"
+col_0: "20/05/2026", col_1: "-45.00", col_2: "WOOLWORTHS 3362 BRUNSWICK"
+col_0: "19/05/2026", col_1: "500.00", col_2: "SALARY DEPOSIT ABC PTY LTD"
+col_0: "27/04/2026", col_1: "2706.00",col_2: "PAYMENT FROM WATERFIELD ASSETS PTY LTD",col_3: "WATERFIELD ASSETS PTY LTD",col_4: "LIANG Y",col_5: "",col_6: "RENTAL PAYMENT"
+
+Correct output:
+{{"date": "col_0", "amount": "col_1", "vendor": "col_2", "description": "col_2", "type_col": null, "income_types": [], "expense_types": [], "exclude_types": [], "status_col": null, "completed_status": null, "debit_col": null, "credit_col": null, "tax": null, "category": null, "invoice_number": null}}
 
 CSV headers: {headers}
 
@@ -295,7 +305,7 @@ async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
     safe_headers = ", ".join(f'"{h}"' for h in headers).replace("{", "{{").replace("}", "}}")
     safe_sample = sample_lines.replace("{", "{{").replace("}", "}}")
     prompt = MAPPING_PROMPT.format(headers=safe_headers, sample=safe_sample)
-    raw = await _ollama_generate(prompt)
+    raw = await _ollama_generate(prompt, force_json=True)
     mapping = _parse_json(raw)
     header_map = {h.lower().strip(): h for h in headers}
 
@@ -337,6 +347,35 @@ async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
     _INVOICE_COL_BLOCKLIST = re.compile(r"\baccount\b|\bcard\b|\bcustomer\b|\bclient\b|\buser\b", re.IGNORECASE)
     if resolved.get("invoice_number") and _INVOICE_COL_BLOCKLIST.search(resolved["invoice_number"]):
         resolved["invoice_number"] = None
+
+    # Guard: if type_col is set but income_types and expense_types are both empty, the file is
+    # sign-based and type_col is meaningless — clear it so it doesn't steal a useful column.
+    if resolved.get("type_col") and not resolved.get("income_types") and not resolved.get("expense_types"):
+        resolved["type_col"] = None
+
+    # Guard: if vendor maps to a column that is empty in all sample rows, find the best
+    # non-empty text column that isn't already used for date/amount.
+    def _col_has_values(col: str) -> bool:
+        return any(row.get(col, "").strip() for row in sample_rows[:10])
+
+    if resolved.get("vendor") and not _col_has_values(resolved["vendor"]):
+        reserved = {resolved.get("date"), resolved.get("amount"), resolved.get("debit_col"), resolved.get("credit_col")}
+        _num_re = re.compile(r'^-?\s*[\d,]+\.?\d*$')
+        _date_re = re.compile(r'^\d{1,4}[-/]\d{1,2}[-/]\d{2,4}$|^\d{1,2}\s+\w+\s+\d{2,4}$')
+        best = None
+        for h in headers:
+            if h in reserved:
+                continue
+            text_vals = [row.get(h, "").strip() for row in sample_rows[:10] if row.get(h, "").strip()]
+            if text_vals and not _num_re.match(text_vals[0]) and not _date_re.match(text_vals[0]):
+                best = h
+                break
+        resolved["vendor"] = best
+
+    # Fallback: if description is unmapped but vendor is mapped, use the same column —
+    # ensures the raw transaction text is always stored even when there's only one text column.
+    if not resolved.get("description") and resolved.get("vendor"):
+        resolved["description"] = resolved["vendor"]
 
     return resolved
 

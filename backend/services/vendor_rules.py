@@ -1,8 +1,8 @@
 from sqlalchemy.orm import Session
 
-from backend.rules.vendor_rules import BUILT_IN_RULES, VALID_CATEGORIES
+from backend.rules.vendor_rules import BUILT_IN_RULES, VALID_CATEGORIES, INCOME_CATEGORIES
 
-__all__ = ["BUILT_IN_RULES", "VALID_CATEGORIES"]
+__all__ = ["BUILT_IN_RULES", "VALID_CATEGORIES", "INCOME_CATEGORIES"]
 
 
 def _match_rules(vendor: str, rules: list[tuple[str, str]]) -> str | None:

@@ -10,7 +10,7 @@ BAS/GST preparation
 +
 tax optimization recommendations (with explanation and confidence)
 ```
-It's a safe and intelligent financial operations assistant for Australian small businesses.
+It's a safe and intelligent financial operations assistant for Australian small businesses, sole traders, or any individuals who want to do their own accounting. 
 
 ## Core Feature
 
@@ -148,6 +148,7 @@ Vector DB:
 
     ```
 4. Vendor normalisation: Different emails might write the same vendor differently (AWS, Amazon Web Services, AMAZON WEB SVCS). RAG can find existing vendor names and prompt the model to match them.
+5. hallucination: output is unreliable sometimes, and the prompt words sometimes get into the output. Use bigger model, add a few more concrete examples in the prompt. 
 
 ## Roadmap
 ### Phase 1
@@ -156,7 +157,6 @@ Vector DB:
 - anomaly detection
 - monthly summaries
 - User define rules from UI
-- remove duplication from different sources, e.g. back csv and emails
 ### Phase 2
 - BAS estimation
 - deduction recommendations

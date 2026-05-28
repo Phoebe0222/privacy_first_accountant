@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-const CATEGORIES = ["food", "grocery", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "office", "subscription", "shopping", "leisure", "material", "other"];
+const CATEGORIES = ["food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 
 type VendorRule = { id: number; vendor_pattern: string; category: string };
 type BuiltInRule = { vendor_pattern: string; category: string };
