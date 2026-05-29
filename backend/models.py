@@ -20,6 +20,8 @@ class Transaction(Base):
     raw_text = Column(Text, nullable=True)
     anomaly = Column(Boolean, default=False, nullable=True)
     anomaly_reason = Column(String, nullable=True)
+    needs_review = Column(Boolean, default=False, nullable=True)
+    category_confidence = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

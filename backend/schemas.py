@@ -47,3 +47,4 @@ class TransactionUpdate(BaseModel):
     type: Optional[str] = None
     description: Optional[str] = None
     invoice_number: Optional[str] = None
+    needs_review: Optional[bool] = None

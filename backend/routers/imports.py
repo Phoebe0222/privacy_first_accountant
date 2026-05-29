@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal, get_db
 from backend.schemas import EmailAccountCreate
 from backend.models import EmailAccount, Transaction
-from backend.services.ai import extract_from_text, extract_from_image, categorize_vendors, map_csv_columns
+from backend.services.ai import extract_from_image
+from backend.services.csv_mapping_agent import map_csv_columns
+from backend.services.extraction_agent import extract_from_text
+from backend.services.categorization_agent import run_pipeline
 from backend.services import rag
 from backend.services.email_ingestion import fetch_email_headers, fetch_email_bodies
 from backend.services.pdf_ingestion import (
@@ -98,6 +101,22 @@ async def _run_ai_extraction(
     except Exception:
         similar = []
     result = await extract_from_text(text, category_rules=category_rules, similar_transactions=similar)
+
+    # Override category with the dedicated categorisation pipeline
+    if not result.get("skip"):
+        cat = await run_pipeline(
+            vendor=result.get("vendor") or "",
+            description=result.get("description") or "",
+            amount=float(result.get("amount") or 0),
+            tx_type=result.get("type") or "expense",
+            rules=category_rules,
+        )
+        result["category"] = cat["category"]
+        result["category_confidence"] = cat["confidence"]
+        result["needs_review"] = cat["needs_review"]
+        log.info("CATEGORIZED | %s → %s (%.0f%%) method=%s",
+                 result.get("vendor"), cat["category"], cat["confidence"] * 100, cat["method"])
+
     log.info("AI done %.1fs | skip=%s vendor=%s amount=%s type=%s | %s",
              time.monotonic() - t, result.get("skip"), result.get("vendor"),
              result.get("amount"), result.get("type"), label)
@@ -173,6 +192,8 @@ def _build_transaction(
         raw_text=raw_text,
         anomaly=is_anomaly,
         anomaly_reason=data.get("anomaly_reason"),
+        needs_review=bool(data.get("needs_review", False)),
+        category_confidence=data.get("category_confidence"),
     )
 
 
@@ -392,7 +413,7 @@ async def _run_email_sync(
             "not_financial": skipped_count + pre_filtered,
             "errors": errors,
         }
-        asyncio.create_task(_index_transactions(transaction_ids))
+        asyncio.create_task(_index_transactions(transaction_ids)) 
     except Exception as e:
         _jobs[job_id] = {"status": "failed", "error": str(e)}
     finally:
@@ -524,29 +545,56 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
         try:
             category_rules = _load_category_rules(db)
 
-            # Ask AI to categorize: real vendor names without a CSV category, plus
-            # descriptions for rows where the vendor is Unknown.
-            to_categorize = set()
+            # Build a deduplicated lookup key → (vendor, description, amount, type)
+            # for transactions that still need categorisation.
+            # Transactions with a non-generic CSV category skip the pipeline entirely.
+            pending: dict[str, tuple[str, str, float, str]] = {}
             for tx in transactions:
                 csv_category = tx.get("category") or ""
                 if csv_category and csv_category != "other":
                     continue
-                if tx["vendor"] != "Unknown":
-                    to_categorize.add(tx["vendor"])
-                elif tx.get("description"):
-                    to_categorize.add(tx["description"]) # some statements put the vendor name in the description column, so use that as a fallback if vendor is Unknown
-            vendor_categories = await categorize_vendors(list(to_categorize), category_rules=category_rules)
+                key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
+                if key not in pending:
+                    pending[key] = (
+                        tx["vendor"],
+                        tx.get("description", ""),
+                        float(tx.get("amount") or 0),
+                        tx.get("type", "expense"),
+                    )
+
+            # Run the categorisation pipeline concurrently for each unique key
+            sem = asyncio.Semaphore(5)
+
+            async def _categorize_key(key: str, vendor: str, desc: str, amount: float, tx_type: str):
+                async with sem:
+                    return key, await run_pipeline(vendor, desc, amount, tx_type, category_rules)
+
+            tasks = [
+                asyncio.create_task(_categorize_key(k, v, d, a, t))
+                for k, (v, d, a, t) in pending.items()
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            pipeline_results: dict[str, dict] = {}
+            for r in results:
+                if isinstance(r, Exception):
+                    log.warning("CSV categorise error: %s", r)
+                    continue
+                key, cat_result = r
+                pipeline_results[key] = cat_result
+                log.info("CSV CAT | %s → %s (%.0f%%) method=%s",
+                         key, cat_result["category"], cat_result["confidence"] * 100, cat_result["method"])
 
             added = 0
             for tx in transactions:
                 csv_category = tx.get("category") or ""
                 if csv_category and csv_category != "other":
-                    category = csv_category
-                elif tx["vendor"] != "Unknown":
-                    category = vendor_categories.get(tx["vendor"]) or "other"
+                    data = {**tx, "needs_review": False, "category_confidence": 1.0}
                 else:
-                    category = vendor_categories.get(tx.get("description", "")) or "other"
-                data = {**tx, "category": category}
+                    key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
+                    cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True})
+                    data = {**tx, "category": cat["category"],
+                            "needs_review": cat["needs_review"],
+                            "category_confidence": cat["confidence"]}
                 t = _build_transaction(data, source="csv", source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1

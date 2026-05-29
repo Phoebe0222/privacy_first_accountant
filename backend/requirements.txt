@@ -9,3 +9,5 @@ beautifulsoup4
 python-dateutil
 pillow
 chromadb
+langchain-core
+langchain-ollama

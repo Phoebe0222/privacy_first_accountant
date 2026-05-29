@@ -63,7 +63,9 @@ Backend:
 - Python FastAPI
 
 AI Layer:
-- Ollama for extraction
+- Ollama runtime
+- Rag
+- Multi-agents framework
 - Llama 3 for csv ingestion
 
 Database:
@@ -75,19 +77,6 @@ File storage:
 Vector DB:
 - Chromadb
 
-## Tools
-
-| Purpose             | Local Tool              |
-| ------------------- | ----------------------- |
-| OCR                 | Tesseract / PaddleOCR   |
-| Document parsing    | Unstructured.io         |
-| LLM extraction      | Ollama                  |
-| Local models        | Llama 3, Mistral, Gemma |
-| Embeddings          | nomic-embed-text        |
-| Workflow automation | n8n                     |
-| Email sync          | IMAP                    |
-| DB                  | SQLite                  |
-| Vector DB           | Chromadb                |
 
 
 ## Core RAG flow 
@@ -121,34 +110,11 @@ Vector DB:
 
 - ### deduction examples
 
-## AI Improvement
-1. The extraction accuracy: types and category is sometimes wrong 
-    - use rules e.g. 
-    ```
-    Uber → Transport
-    AWS → Hosting
-    Officeworks → Office Supplies
-    ```
-    - email and pdf extract: rules added in prompt
-    - csv extract: column mapping prompt -> categorize prompt 
+## Multi-agents framework 
+- ### Extraction agent 
+- ### Categorise agent 
+- ### CSV column mapping agent 
 
-2. csv exports from different source are very different 
-2. Extraction / deduplication: When extracting a new transaction from an email or PDF, use RAG to search for similar existing transactions first  
-    ```
-    "AWS invoice $120"
-    → RAG finds: previous AWS transactions
-    → Prompt: "Here are past AWS transactions for reference: [...]
-            Categorise this new one consistently."
-    ```
-3. Anomaly detection: Before saving a transaction, search for similar past ones and compare the amount
-    ```
-    "Electricity bill $890"
-    → RAG finds: past electricity bills averaging $120
-    → Prompt: "Past bills averaged $120. This one is $890 — flag as anomaly?"
-
-    ```
-4. Vendor normalisation: Different emails might write the same vendor differently (AWS, Amazon Web Services, AMAZON WEB SVCS). RAG can find existing vendor names and prompt the model to match them.
-5. hallucination: output is unreliable sometimes, and the prompt words sometimes get into the output. Use bigger model, add a few more concrete examples in the prompt. 
 
 ## Roadmap
 ### Phase 1
@@ -156,7 +122,8 @@ Vector DB:
 - **categorization** -- **this is important**
 - anomaly detection
 - monthly summaries
-- User define rules from UI
+- User define rules from UI -- deterministic
+- bank reconciliation
 ### Phase 2
 - BAS estimation
 - deduction recommendations
@@ -169,4 +136,8 @@ Vector DB:
 - accountant collaboration mode
 - one-click export to accountant
 - audit trail
-- reconciliation
+
+
+## Prompt Improvement
+
+4. Vendor normalisation: Different emails might write the same vendor differently (AWS, Amazon Web Services, AMAZON WEB SVCS). RAG can find existing vendor names and prompt the model to match them.

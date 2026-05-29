@@ -23,6 +23,7 @@ def list_transactions(
     date_to: Optional[str] = None,
     source: Optional[str] = None,
     vendor: Optional[str] = None,
+    needs_review: Optional[bool] = None,
     sort_by: str = "date",
     sort_dir: str = "desc",
     limit: int = 200,
@@ -44,6 +45,8 @@ def list_transactions(
         q = q.filter(Transaction.source == source)
     if vendor:
         q = q.filter(Transaction.vendor.ilike(f"%{vendor}%"))
+    if needs_review is not None:
+        q = q.filter(Transaction.needs_review == needs_review)
     total = q.count()
     col = getattr(Transaction, sort_by if sort_by in SORTABLE_COLUMNS else "date")
     order = desc(col) if sort_dir == "desc" else asc(col)
@@ -73,13 +76,30 @@ async def update_transaction(
         raise HTTPException(status_code=404, detail="Transaction not found")
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(t, field, value)
+    # User correcting a category means they're confident — clear the review flag
+    if body.category is not None:
+        t.needs_review = False
+        t.category_confidence = 1.0
     db.commit()
     db.refresh(t)
     try:
-        await rag.index_transaction(t) # re-index the transaction in the RAG system to update its vector representation based on the new data
+        await rag.index_transaction(t)
     except Exception:
         pass
     return _serialize(t)
+
+
+@router.get("/review-queue")
+def review_queue(db: Session = Depends(get_db)):
+    """Return transactions flagged for category review, lowest confidence first."""
+    items = (
+        db.query(Transaction)
+        .filter(Transaction.needs_review == True)  # noqa: E712
+        .order_by(Transaction.category_confidence.asc())
+        .limit(100)
+        .all()
+    )
+    return {"count": len(items), "items": [_serialize(t) for t in items]}
 
 
 @router.delete("")
@@ -190,5 +210,7 @@ def _serialize(t: Transaction) -> dict:
         "invoice_number": t.invoice_number,
         "anomaly": t.anomaly or False,
         "anomaly_reason": t.anomaly_reason,
+        "needs_review": t.needs_review or False,
+        "category_confidence": t.category_confidence,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }

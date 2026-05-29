@@ -27,6 +27,8 @@ def init_db():
         for col, definition in [
             ("anomaly", "BOOLEAN DEFAULT 0"),
             ("anomaly_reason", "VARCHAR"),
+            ("needs_review", "BOOLEAN DEFAULT 0"),
+            ("category_confidence", "REAL"),
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(
