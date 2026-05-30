@@ -211,7 +211,7 @@ _pipeline = (
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def run_pipeline(
+async def categorize_transaction(
     vendor: str,
     description: str,
     amount: float,

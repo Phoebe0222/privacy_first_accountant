@@ -9,24 +9,22 @@ DATE_RE = re.compile(r"^\d{1,4}[-/]\d{1,2}[-/]\d{2,4}$|^\d{1,2}\s+\w+\s+\d{2,4}$
 NUM_RE = re.compile(r'^-?\s*["$]?[\d,]+\.?\d*$')
 
 
-# ── LLM singleton ─────────────────────────────────────────────────────────────
+# ── LLM factory (cached per model+temperature) ────────────────────────────────
 
 try:
     from langchain_ollama import ChatOllama
-    _llm: Optional["ChatOllama"] = None
+    _llm_cache: dict[str, "ChatOllama"] = {}
 
-    def get_llm() -> "ChatOllama":
-        global _llm
-        if _llm is None:
-            _llm = ChatOllama(
-                model=os.getenv("EXTRACT_MODEL", "llama3.2:3b"),
-                temperature=0,
-                base_url=os.getenv("OLLAMA_BASE", "http://localhost:11434"),
-            )
-        return _llm
+    def get_llm(model: Optional[str] = None, temperature: int = 0) -> "ChatOllama":
+        _model = model or os.getenv("EXTRACT_MODEL", "llama3.2:3b")
+        _base = os.getenv("OLLAMA_BASE", "http://localhost:11434")
+        key = f"{_model}:{temperature}"
+        if key not in _llm_cache:
+            _llm_cache[key] = ChatOllama(model=_model, temperature=temperature, base_url=_base)
+        return _llm_cache[key]
 
 except ImportError:
-    def get_llm():  # type: ignore[misc]
+    def get_llm(model: Optional[str] = None, temperature: int = 0):  # type: ignore[misc]
         raise RuntimeError("langchain-ollama is not installed")
 
 

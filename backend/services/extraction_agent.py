@@ -18,6 +18,7 @@ Replaces the single monolithic EXTRACTION_PROMPT with three focused agents:
 
 import logging
 import os
+import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 
 OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
 EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "llama3.2:3b")
+VISION_MODEL = os.getenv("VISION_MODEL", "moondream2")
 
 
 # ── Pipeline state ────────────────────────────────────────────────────────────
@@ -36,6 +38,7 @@ EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "llama3.2:3b")
 class ExtractionState(BaseModel):
     text: str
     similar_docs: list[str] = []
+    rules: list[tuple[str, str]] = []
     # Filled progressively by each agent
     skip: bool = False
     skip_reason: Optional[str] = None
@@ -48,6 +51,11 @@ class ExtractionState(BaseModel):
     invoice_number: Optional[str] = None
     anomaly: bool = False
     anomaly_reason: Optional[str] = None
+    category: str = "other"
+    category_confidence: float = 0.0
+    needs_review: bool = True
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 # ── Structured output schemas ─────────────────────────────────────────────────
@@ -116,6 +124,18 @@ async def _skip_agent(state: ExtractionState) -> ExtractionState:
 
 # ── Agent 2: Income / expense classification ──────────────────────────────────
 
+# Patterns that unambiguously indicate money coming IN — bypass the LLM for these
+_INCOME_RE = re.compile(
+    r"\brefund(ed|ing)?\b"
+    r"|\bpartial\s+refund\b"
+    r"|\bwe.?ve\s+(issued|processed|sent)\s+(a\s+)?refund\b"
+    r"|\byour\s+refund\b"
+    r"|\bpayout\s+(of|has\s+been)\b"
+    r"|\bfunds?\s+(have\s+been\s+)?(sent|transferred|deposited)\s+to\s+you\b"
+    r"|\byou\s+have\s+been\s+paid\b",
+    re.IGNORECASE,
+)
+
 _TYPE_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """\
 Classify a financial transaction as income or expense.
@@ -138,6 +158,9 @@ Return ONLY the JSON object."""),
 async def _type_agent(state: ExtractionState) -> ExtractionState:
     if state.skip:
         return state
+    if _INCOME_RE.search(state.text[:500]):
+        log.debug("Type agent: income (regex shortcut)")
+        return state.model_copy(update={"tx_type": "income"})
     try:
         chain = _TYPE_PROMPT | get_llm().with_structured_output(TypeDecision)
         result: TypeDecision = await chain.ainvoke({"text": state.text[:2000]})
@@ -182,13 +205,13 @@ async def _fields_agent(state: ExtractionState) -> ExtractionState:
             "set anomaly=true and briefly explain in anomaly_reason."
         )
     try:
+        from backend.services.utils import normalise_date
         chain = _FIELDS_PROMPT | get_llm().with_structured_output(FieldsExtraction)
         result: FieldsExtraction = await chain.ainvoke({
             "text": state.text[:3000],
             "tx_type": state.tx_type or "expense",
             "similar_hint": similar_hint,
         })
-        from backend.services.utils import normalise_date
         return state.model_copy(update={
             "vendor": result.vendor,
             "date": normalise_date(result.date) if result.date else None,
@@ -204,31 +227,80 @@ async def _fields_agent(state: ExtractionState) -> ExtractionState:
         return state.model_copy(update={"skip": True, "skip_reason": f"extraction failed: {e}"})
 
 
+async def _load_rules_step(state: ExtractionState) -> ExtractionState:
+    if state.rules:
+        return state
+    from backend.database import SessionLocal
+    from backend.models import VendorRule
+    from backend.services.vendor_rules import BUILT_IN_RULES
+    db = SessionLocal()
+    try:
+        user_rules = db.query(VendorRule).all()
+        user_pairs = sorted(
+            [(r.vendor_pattern.lower().strip(), r.category) for r in user_rules],
+            key=lambda x: len(x[0]),
+            reverse=True,
+        )
+        return state.model_copy(update={"rules": user_pairs + BUILT_IN_RULES})
+    finally:
+        db.close()
+
+
+async def _rag_search_step(state: ExtractionState) -> ExtractionState:
+    if state.similar_docs:
+        return state
+    try:
+        from backend.services import rag
+        similar = await rag.search(state.text[:300], n_results=5)
+        return state.model_copy(update={"similar_docs": similar})
+    except Exception:
+        return state
+
+
+async def _vendor_normalizer(state: ExtractionState) -> ExtractionState:
+    if state.skip or not state.vendor:
+        return state
+    from backend.services.vendor_normalizer import normalize_vendor
+    return state.model_copy(update={"vendor": await normalize_vendor(state.vendor)})
+
+
+async def _categorize_step(state: ExtractionState) -> ExtractionState:
+    if state.skip or not state.rules:
+        return state
+    from backend.services.categorization_agent import categorize_transaction
+    cat = await categorize_transaction(
+        vendor=state.vendor or "",
+        description=state.description or "",
+        amount=float(state.amount or 0),
+        tx_type=state.tx_type or "expense",
+        rules=state.rules,
+    )
+    return state.model_copy(update={
+        "category": cat["category"],
+        "category_confidence": cat["confidence"],
+        "needs_review": cat["needs_review"],
+    })
+
+
 # ── LCEL pipeline ─────────────────────────────────────────────────────────────
 
 _pipeline = (
-    RunnableLambda(_skip_agent)
+    RunnableLambda(_load_rules_step)
+    | RunnableLambda(_rag_search_step)
+    | RunnableLambda(_skip_agent)
     | RunnableBranch(
         (lambda s: s.skip, RunnableLambda(lambda s: s)),
         RunnableLambda(_type_agent) | RunnableLambda(_fields_agent),
     )
+    | RunnableLambda(_vendor_normalizer)
+    | RunnableLambda(_categorize_step)
 )
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def extract_from_text(
-    text: str,
-    category_rules: list[tuple[str, str]] | None = None,  # kept for API compat, unused
-    similar_transactions: list[str] | None = None,
-) -> dict:
-    """
-    Run the 3-agent extraction pipeline.
-    Returns a dict compatible with _build_transaction in imports.py.
-    category_rules is accepted but unused — categorisation is handled by
-    the separate categorization_agent pipeline.
-    """
-    state = ExtractionState(text=text, similar_docs=similar_transactions or [])
+async def extract_from_text(text: str) -> dict:
+    state = ExtractionState(text=text)
     final: ExtractionState = await _pipeline.ainvoke(state)
     return {
         "skip": final.skip,
@@ -241,5 +313,35 @@ async def extract_from_text(
         "invoice_number": final.invoice_number,
         "anomaly": final.anomaly,
         "anomaly_reason": final.anomaly_reason,
-        "category": "other",  # overridden immediately by categorization_agent
+        "category": final.category,
+        "category_confidence": final.category_confidence,
+        "needs_review": final.needs_review,
     }
+
+
+async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """OCR an image with the vision model. Returns raw text, or empty string on failure."""
+    import base64
+    import httpx
+
+    b64 = base64.b64encode(image_bytes).decode()
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{OLLAMA_BASE}/api/generate",
+                json={
+                    "model": VISION_MODEL,
+                    "prompt": (
+                        "Describe all text visible in this receipt or invoice image. "
+                        "Include vendor name, date, amounts, tax, and any invoice number."
+                    ),
+                    "images": [b64],
+                    "stream": False,
+                },
+            )
+            resp.raise_for_status()
+            return resp.json()["response"]
+    except Exception as e:
+        log.warning("Vision OCR failed: %s", e)
+        return ""
+

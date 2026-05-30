@@ -1,22 +1,16 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
-from backend.models import ATORule, ChatMessage, Transaction
+from backend.models import ATORule, ChatMessage
 from backend.schemas import ChatRequest
-from backend.services.ai import chat as ai_chat
-from backend.services import rag
+from backend.services.chat_agent import chat as ai_chat
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 @router.post("")
 async def send_message(body: ChatRequest, db: Session = Depends(get_db)):
-    # RAG: retrieve transactions semantically relevant to the user's question
-    relevant_docs = await rag.search(body.message, n_results=15) # search returns list of transaction strings most relevant to the query
-    context = _build_context(db, relevant_docs) # build prompt with relevant transactions
-
     history = (
         db.query(ChatMessage)
         .order_by(ChatMessage.created_at.desc())
@@ -26,12 +20,18 @@ async def send_message(body: ChatRequest, db: Session = Depends(get_db)):
     messages = [{"role": m.role, "content": m.content} for m in reversed(history)]
     messages.append({"role": "user", "content": body.message})
 
-    reply = await ai_chat(messages, context) # send conversation history + context to AI for response
+    ato_rules = db.query(ATORule).order_by(ATORule.title).all()
+    system_context = ""
+    if ato_rules:
+        system_context = "Australian tax rules:\n" + "\n".join(
+            f"- {r.title}: {r.description}" for r in ato_rules
+        )
+
+    reply = await ai_chat(messages, system_context)
 
     db.add(ChatMessage(role="user", content=body.message))
     db.add(ChatMessage(role="assistant", content=reply))
     db.commit()
-
     return {"reply": reply}
 
 
@@ -51,41 +51,3 @@ def clear_history(db: Session = Depends(get_db)):
     db.query(ChatMessage).delete()
     db.commit()
     return {"ok": True}
-
-
-def _build_context(db: Session, relevant_docs: list[str]) -> str:
-    total_income = db.query(func.sum(Transaction.amount)).filter(Transaction.type == "income").scalar() or 0
-    total_expenses = db.query(func.sum(Transaction.amount)).filter(Transaction.type == "expense").scalar() or 0
-    net = total_income - total_expenses
-
-    lines = [
-        f"Total income: ${total_income:.2f}",
-        f"Total expenses: ${total_expenses:.2f}",
-        f"Net profit: ${net:.2f}",
-        f"Total transactions indexed: {rag.indexed_count()}",
-    ]
-
-    ato_rules = db.query(ATORule).order_by(ATORule.title).all()
-    #TODO: maybe build a different prompt for tax-related questions that includes the ATO rules, and a more general prompt for other questions that doesn't include the ATO rules, to avoid overwhelming the model with too much information when it's not relevant.
-    if ato_rules:
-        lines += ["", "Australian tax rules and context:"]
-        for r in ato_rules:
-            lines.append(f"  {r.title}: {r.description}")
-
-    if relevant_docs:
-        lines += ["", "Most relevant transactions for this query:"]
-        for doc in relevant_docs:
-            lines.append(doc)
-            lines.append("---")
-    else:
-        recent = (
-            db.query(Transaction)
-            .order_by(Transaction.date.desc())
-            .limit(20)
-            .all()
-        )
-        lines += ["", "Recent transactions:"]
-        for t in recent:
-            lines.append(f"  {t.date} | {t.vendor} | {t.type} | ${t.amount:.2f} | {t.category}")
-
-    return "\n".join(lines)
