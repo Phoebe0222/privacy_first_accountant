@@ -27,7 +27,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnableBranch
-from langchain_ollama import ChatOllama
+from backend.services.utils import get_llm
 
 log = logging.getLogger(__name__)
 
@@ -155,21 +155,11 @@ _PROMPT = ChatPromptTemplate.from_messages([
     )),
 ])
 
-_llm: Optional[ChatOllama] = None
-
-
-def _get_llm() -> ChatOllama:
-    global _llm
-    if _llm is None:
-        _llm = ChatOllama(model=EXTRACT_MODEL, temperature=0, base_url=OLLAMA_BASE)
-    return _llm
-
-
 async def _llm_categorize(state: CategorizationState) -> CategorizationState:
     if state.category is not None:
         return state
     try:
-        chain = _PROMPT | _get_llm().with_structured_output(LLMCategorizationResult)
+        chain = _PROMPT | get_llm().with_structured_output(LLMCategorizationResult)
         result: LLMCategorizationResult = await chain.ainvoke({
             "vendor": state.vendor,
             "description": state.description[:300],

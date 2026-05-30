@@ -16,6 +16,8 @@ python-dateutil = "*"
 pillow = "*"
 chromadb = "*"
 openpyxl = "*"
+langchain-core = "*"
+langchain-ollama = "*"
 
 [dev-packages]
 

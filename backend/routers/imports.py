@@ -275,8 +275,10 @@ async def sync_email_account(
 
     if reimport:
         email_ids = [row.id for row in db.query(Transaction.id).filter(Transaction.source == "email").all()]
-        for tid in email_ids:
-            rag.remove_transaction(tid)
+        if email_ids:
+            str_ids = [str(tid) for tid in email_ids]
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: rag._col.delete(ids=str_ids))
         db.query(Transaction).filter(Transaction.source == "email").delete()
         db.commit()
 
@@ -384,7 +386,7 @@ async def _run_email_sync(
                 source="email",
                 source_ref=f"{account_id}:{em['uid']}",
                 raw_text=em["raw_text"],
-                fallback_date=em["date"][:10],
+                fallback_date=em["date"] or None,
                 fallback_vendor=em["from"],
                 fallback_description=em["subject"],
             )

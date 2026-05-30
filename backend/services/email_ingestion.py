@@ -2,6 +2,7 @@ import email
 import re
 from datetime import datetime, timedelta
 from email.header import decode_header
+from email.utils import parsedate_to_datetime
 
 from bs4 import BeautifulSoup
 from imapclient import IMAPClient
@@ -11,6 +12,22 @@ FINANCIAL_KEYWORDS = [
     "invoice", "receipt", "payment", "order", "transaction", "charge",
     "subscription", "billing", "statement", "purchase", "refund", "deposit",
 ]
+
+
+def _parse_email_date(raw: str) -> str:
+    """Parse RFC 2822 email date header to YYYY-MM-DD."""
+    if not raw:
+        return ""
+    try:
+        return parsedate_to_datetime(raw.strip()).strftime("%Y-%m-%d")
+    except Exception:
+        # Fallback for malformed headers — strip the weekday prefix if present
+        # e.g. "Tue, 14 Oct 2024 ..." → "14 Oct 2024"
+        cleaned = re.sub(r"^[A-Za-z]{3},\s*", "", raw.strip())
+        try:
+            return datetime.strptime(cleaned[:11].strip(), "%d %b %Y").strftime("%Y-%m-%d")
+        except Exception:
+            return ""
 
 
 def _decode_header_value(value: str) -> str:
@@ -98,7 +115,7 @@ def fetch_email_headers(
                 "uid": str(uid),
                 "subject": _decode_header_value(msg.get("Subject", "")),
                 "from": _decode_header_value(msg.get("From", "")),
-                "date": msg.get("Date", ""),
+                "date": _parse_email_date(msg.get("Date", "")),
             })
     return results
 

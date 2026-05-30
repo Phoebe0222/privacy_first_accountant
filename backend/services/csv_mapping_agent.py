@@ -25,7 +25,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda
-from langchain_ollama import ChatOllama
+from backend.services.utils import get_llm
 
 log = logging.getLogger(__name__)
 
@@ -123,18 +123,6 @@ class CSVRowClassificationResult(BaseModel):
     )
 
 
-# ── LLM singleton ─────────────────────────────────────────────────────────────
-
-_llm: Optional[ChatOllama] = None
-
-
-def _get_llm() -> ChatOllama:
-    global _llm
-    if _llm is None:
-        _llm = ChatOllama(model=EXTRACT_MODEL, temperature=0, base_url=OLLAMA_BASE)
-    return _llm
-
-
 # ── Agent 1: Core column mapping ──────────────────────────────────────────────
 
 _CORE_PROMPT = ChatPromptTemplate.from_messages([
@@ -164,7 +152,7 @@ async def _core_agent(state: CSVMappingState) -> CSVMappingState:
     headers_str = ", ".join(f'"{h}"' for h in state.headers)
     sample_str = _format_sample(state.sample_rows)
     try:
-        chain = _CORE_PROMPT | _get_llm().with_structured_output(CSVCoreMappingResult)
+        chain = _CORE_PROMPT | get_llm().with_structured_output(CSVCoreMappingResult)
         result: CSVCoreMappingResult = await chain.ainvoke({
             "headers": headers_str,
             "sample": sample_str,
@@ -205,7 +193,7 @@ async def _classification_agent(state: CSVMappingState) -> CSVMappingState:
     headers_str = ", ".join(f'"{h}"' for h in state.headers)
     sample_str = _format_sample(state.sample_rows)
     try:
-        chain = _CLASSIFICATION_PROMPT | _get_llm().with_structured_output(CSVRowClassificationResult)
+        chain = _CLASSIFICATION_PROMPT | get_llm().with_structured_output(CSVRowClassificationResult)
         result: CSVRowClassificationResult = await chain.ainvoke({
             "headers": headers_str,
             "sample": sample_str,
@@ -227,8 +215,7 @@ _pipeline = RunnableLambda(_core_agent) | RunnableLambda(_classification_agent)
 
 _STATUS_COL_BLOCK = re.compile(r"\btype\b|\bmethod\b|\bmode\b", re.IGNORECASE)
 _INVOICE_COL_BLOCK = re.compile(r"\baccount\b|\bcard\b|\bcustomer\b|\bclient\b|\buser\b", re.IGNORECASE)
-_NUM_RE = re.compile(r'^-?\s*[\d,]+\.?\d*$')
-_DATE_RE = re.compile(r'^\d{1,4}[-/]\d{1,2}[-/]\d{2,4}$|^\d{1,2}\s+\w+\s+\d{2,4}$')
+from backend.services.utils import NUM_RE as _NUM_RE, DATE_RE as _DATE_RE
 
 
 def _resolve(name: Optional[str], header_map: dict[str, str]) -> Optional[str]:

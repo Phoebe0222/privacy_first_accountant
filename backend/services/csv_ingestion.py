@@ -2,9 +2,7 @@ import csv
 import io
 import re
 
-
-_DATE_RE = re.compile(r"^\d{1,4}[-/]\d{1,2}[-/]\d{2,4}$|^\d{1,2}\s+\w+\s+\d{2,4}$")
-_NUMBER_RE = re.compile(r'^-?\s*["$]?[\d,]+\.?\d*$')
+from backend.services.utils import normalise_date as _normalise_date, DATE_RE as _DATE_RE, NUM_RE as _NUMBER_RE
 
 # Descriptions that indicate an internal transfer between the user's own accounts.
 # These should be skipped — the same movement appears as both income and expense
@@ -188,33 +186,3 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
     return transactions
 
 
-_MONTH_ALIASES = {
-    "jan": "Jan", "feb": "Feb", "mar": "Mar", "apr": "Apr",
-    "may": "May", "jun": "Jun", "jul": "Jul", "aug": "Aug",
-    "sept": "Sep", "sep": "Sep", "oct": "Oct", "nov": "Nov", "dec": "Dec",
-    "january": "January", "february": "February", "march": "March",
-    "april": "April", "june": "June", "july": "July", "august": "August",
-    "september": "September", "october": "October", "november": "November",
-    "december": "December",
-}
-
-def _normalise_date(raw: str) -> str:
-    from datetime import datetime
-    raw = raw.strip()
-    # Remove trailing time component (e.g. "2026-04-15 01:23:21" or "2026-04-15T14:00:00")
-    raw = re.sub(r"[T ]\d{1,2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$", "", raw).strip()
-    # Canonicalise non-standard month names (e.g. "Sept" → "Sep", "July" → "July")
-    raw = re.sub(
-        r"\b([A-Za-z]+)\b",
-        lambda m: _MONTH_ALIASES.get(m.group(1).lower(), m.group(1)),
-        raw,
-    )
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y",
-                "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
-                "%d %b %y", "%d %B %y",
-                "%Y/%m/%d", "%d-%b-%Y"):
-        try:
-            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            continue
-    return raw

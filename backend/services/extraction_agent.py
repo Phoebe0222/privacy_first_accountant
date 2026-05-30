@@ -23,7 +23,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnableBranch
-from langchain_ollama import ChatOllama
+from backend.services.utils import get_llm
 
 log = logging.getLogger(__name__)
 
@@ -77,18 +77,6 @@ class FieldsExtraction(BaseModel):
     anomaly_reason: Optional[str] = Field(default=None, description="Brief explanation if anomaly=True")
 
 
-# ── LLM singleton ─────────────────────────────────────────────────────────────
-
-_llm: Optional[ChatOllama] = None
-
-
-def _get_llm() -> ChatOllama:
-    global _llm
-    if _llm is None:
-        _llm = ChatOllama(model=EXTRACT_MODEL, temperature=0, base_url=OLLAMA_BASE)
-    return _llm
-
-
 # ── Agent 1: Skip detection ───────────────────────────────────────────────────
 
 _SKIP_PROMPT = ChatPromptTemplate.from_messages([
@@ -117,7 +105,7 @@ Return ONLY the JSON object."""),
 
 async def _skip_agent(state: ExtractionState) -> ExtractionState:
     try:
-        chain = _SKIP_PROMPT | _get_llm().with_structured_output(SkipDecision)
+        chain = _SKIP_PROMPT | get_llm().with_structured_output(SkipDecision)
         result: SkipDecision = await chain.ainvoke({"text": state.text[:3000]})
         log.debug("Skip agent: skip=%s reason=%s", result.skip, result.reason)
         return state.model_copy(update={"skip": result.skip, "skip_reason": result.reason})
@@ -151,7 +139,7 @@ async def _type_agent(state: ExtractionState) -> ExtractionState:
     if state.skip:
         return state
     try:
-        chain = _TYPE_PROMPT | _get_llm().with_structured_output(TypeDecision)
+        chain = _TYPE_PROMPT | get_llm().with_structured_output(TypeDecision)
         result: TypeDecision = await chain.ainvoke({"text": state.text[:2000]})
         log.debug("Type agent: type=%s", result.type)
         return state.model_copy(update={"tx_type": result.type})
@@ -194,16 +182,16 @@ async def _fields_agent(state: ExtractionState) -> ExtractionState:
             "set anomaly=true and briefly explain in anomaly_reason."
         )
     try:
-        chain = _FIELDS_PROMPT | _get_llm().with_structured_output(FieldsExtraction)
+        chain = _FIELDS_PROMPT | get_llm().with_structured_output(FieldsExtraction)
         result: FieldsExtraction = await chain.ainvoke({
             "text": state.text[:3000],
             "tx_type": state.tx_type or "expense",
             "similar_hint": similar_hint,
         })
-        from backend.services.csv_ingestion import _normalise_date
+        from backend.services.utils import normalise_date
         return state.model_copy(update={
             "vendor": result.vendor,
-            "date": _normalise_date(result.date) if result.date else None,
+            "date": normalise_date(result.date) if result.date else None,
             "amount": result.amount,
             "tax": result.tax,
             "description": result.description,
