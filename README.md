@@ -80,7 +80,7 @@ Vector DB:
 
 
 ## Core RAG flow 
-- ### chat
+- ### chat (maybe)
 1. user asks question
 2. embed the question (convert into a vector)
 3. search vector DB for similar vectors

@@ -44,6 +44,10 @@ export default function TransactionsPage() {
   const [vendor, setVendor] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense", description: "" });
+  const [sourceId, setSourceId] = useState<number | null>(null);
+  const [sourceText, setSourceText] = useState<string>("");
+  const [sourceRef, setSourceRef] = useState<string | null>(null);
+  const [sourceType, setSourceType] = useState<string>("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
@@ -63,6 +67,15 @@ export default function TransactionsPage() {
   useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor]);
   useEffect(() => { load(page); }, [page]);
   useEffect(() => { setPage(1); load(1, sortCol, sortDir); }, [sortCol, sortDir]);
+
+  async function toggleSource(id: number) {
+    if (sourceId === id) { setSourceId(null); return; }
+    const res = await api.getSourceText(id);
+    setSourceText(res.raw_text);
+    setSourceRef(res.source_ref);
+    setSourceType(res.source);
+    setSourceId(id);
+  }
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this transaction?")) return;
@@ -342,12 +355,30 @@ export default function TransactionsPage() {
                         </span>
                       ) : (
                         <span className="flex justify-end gap-3">
+                          {t.source !== "manual" ? (
+                            <button onClick={() => toggleSource(t.id)} className={`transition-colors text-xs ${sourceId === t.id ? "text-blue-500" : "text-gray-300 hover:text-blue-400"}`}>Source</button>
+                          ) : null}
                           <button onClick={() => startEdit(t)} className="text-gray-300 hover:text-blue-500 transition-colors text-xs">Edit</button>
                           <button onClick={() => handleDelete(t.id)} className="text-gray-300 hover:text-red-500 transition-colors text-xs">Delete</button>
                         </span>
                       )}
                     </td>
                   </tr>
+                  {sourceId === t.id && (
+                    <tr className="bg-gray-50">
+                      <td colSpan={9} className="px-4 pb-3 pt-0">
+                        {sourceType === "csv" ? (
+                          <p className="text-xs text-gray-500 py-1">
+                            Imported from: <span className="font-mono text-gray-700">{sourceRef ?? "—"}</span>
+                          </p>
+                        ) : (
+                          <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-64 overflow-y-auto bg-white border border-gray-100 rounded p-3 font-mono leading-relaxed">
+                            {sourceText || "(no source text)"}
+                          </pre>
+                        )}
+                      </td>
+                    </tr>
+                  )}
                 );
               })}
             </tbody>

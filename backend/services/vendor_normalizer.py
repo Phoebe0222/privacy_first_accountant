@@ -1,21 +1,23 @@
 """
 Vendor name normalisation.
 
-Step 1 — deterministic rules: strip legal suffixes, domain parts, geographic words.
-Step 2 — LLM (only when the cleaned name is still complex, i.e. > 3 words).
+Step 1 — deterministic rules: strip legal suffixes and domain parts.
+Step 2 — RAG history: if past transactions agree on a canonical name, use it.
+Step 3 — LLM fallback: only when RAG has no match and the name is still complex.
 
-Results are cached in-process so the LLM is called at most once per unique raw name.
+Results are cached in-process so each raw name is resolved at most once.
 
 Examples
 --------
 "alibaba"                                         → "Alibaba"
 "AIAU MARKETS PTY LTD"                            → "AIAU Markets"
-"Alibaba.com Singapore E-commerce Pte Ltd"        → "Alibaba"
+"Alibaba.com Singapore E-commerce Pte Ltd"        → "Alibaba"  (via RAG or LLM)
 "PayPal Australia Pty Limited"                    → "PayPal"
 """
 
 import logging
 import re
+from collections import Counter
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -53,6 +55,44 @@ def _fix_case(s: str) -> str:
     return s.title() if s == s.upper() else s
 
 
+# ── RAG history lookup ────────────────────────────────────────────────────────
+
+async def _rag_vendor(raw: str, cleaned: str) -> Optional[str]:
+    """
+    Search past transactions for a vendor similar to `raw`.
+    Returns the most-used canonical name if ≥80% of matches agree, else None.
+    """
+    try:
+        from backend.services import rag
+        results = await rag.search(f"vendor:{cleaned}", n_results=10)
+    except Exception:
+        return None
+
+    vendor_lower = cleaned.lower()
+    names: list[str] = []
+    for doc in results:
+        doc_vendor = ""
+        for line in doc.split("\n"):
+            if line.startswith("Vendor:"):
+                doc_vendor = line.split(":", 1)[1].strip()
+                break
+        if not doc_vendor:
+            continue
+        # Only count docs that are about a similar vendor
+        dv_lower = doc_vendor.lower()
+        if vendor_lower in dv_lower or dv_lower in vendor_lower:
+            names.append(doc_vendor)
+
+    if not names:
+        return None
+
+    most_common, count = Counter(names).most_common(1)[0]
+    if count / len(names) >= 0.8:
+        log.debug("Vendor normalized via RAG | %r → %r (%d/%d)", raw, most_common, count, len(names))
+        return most_common
+    return None
+
+
 # ── LLM structured output ─────────────────────────────────────────────────────
 
 class _NormResult(BaseModel):
@@ -88,18 +128,24 @@ async def normalize_vendor(raw: str) -> str:
     if not cleaned:
         cleaned = raw
 
-    words = cleaned.split()
-    if len(words) <= 3:
+    # Step 1: rules alone are sufficient for short names
+    if len(cleaned.split()) <= 3:
         result = _fix_case(cleaned)
         _cache[raw] = result
         return result
 
-    # Still complex after rules — ask the LLM
+    # Step 2: RAG — reuse the canonical name from past transactions
+    rag_result = await _rag_vendor(raw, cleaned)
+    if rag_result:
+        _cache[raw] = rag_result
+        return rag_result
+
+    # Step 3: LLM for complex names with no history
     try:
         chain = _PROMPT | get_llm().with_structured_output(_NormResult)
         norm: _NormResult = await chain.ainvoke({"vendor": raw})
         result = norm.name.strip() or _fix_case(cleaned)
-        log.debug("Vendor normalized | %r → %r", raw, result)
+        log.debug("Vendor normalized via LLM | %r → %r", raw, result)
     except Exception as exc:
         log.debug("Vendor normalization LLM failed for %r: %s", raw, exc)
         result = _fix_case(cleaned)

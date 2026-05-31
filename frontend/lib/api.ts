@@ -65,6 +65,9 @@ export const api = {
   deleteTransaction: (id: number) =>
     req<{ ok: boolean }>(`/transactions/${id}`, { method: "DELETE" }),
 
+  getSourceText: (id: number) =>
+    req<{ id: number; source: string; source_ref: string | null; raw_text: string }>(`/transactions/${id}/source`),
+
   deleteBySourceRef: (sourceRef: string) =>
     req<{ deleted: number }>(`/transactions?source_ref=${encodeURIComponent(sourceRef)}`, { method: "DELETE" }),
 

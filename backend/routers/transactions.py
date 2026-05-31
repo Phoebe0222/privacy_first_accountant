@@ -127,6 +127,14 @@ async def bulk_delete(source_ref: Optional[str] = None, source: Optional[str] = 
     return {"deleted": len(ids)}
 
 
+@router.get("/{transaction_id}/source")
+def get_source_text(transaction_id: int, db: Session = Depends(get_db)):
+    t = db.get(Transaction, transaction_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"id": t.id, "source": t.source, "source_ref": t.source_ref, "raw_text": t.raw_text or ""}
+
+
 @router.get("/{transaction_id}/attachments")
 def list_attachments(transaction_id: int, db: Session = Depends(get_db)):
     atts = db.query(Attachment).filter(Attachment.transaction_id == transaction_id).all()
