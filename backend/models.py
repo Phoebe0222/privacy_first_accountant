@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Boolean, Column, Integer, String, Float, Text, DateTime
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, LargeBinary, String, Float, Text, DateTime
 from backend.database import Base
 
 
@@ -22,6 +22,17 @@ class Transaction(Base):
     anomaly_reason = Column(String, nullable=True)
     needs_review = Column(Boolean, default=False, nullable=True)
     category_confidence = Column(Float, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    transaction_id = Column(Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = Column(String, nullable=True)
+    mime_type = Column(String, nullable=False)
+    data = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

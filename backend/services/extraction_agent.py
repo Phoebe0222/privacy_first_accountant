@@ -1,19 +1,38 @@
 """
 Extraction pipeline using LangChain LCEL.
-Replaces the single monolithic EXTRACTION_PROMPT with three focused agents:
 
-  ┌──────────────┐
-  │  Skip Agent  │  Is this a real completed transaction?
-  └──────┬───────┘
-         │ not skipped
-         ▼
-  ┌──────────────┐
-  │  Type Agent  │  Income or expense?
-  └──────┬───────┘
-         ↓
-  ┌──────────────┐
-  │ Fields Agent │  Extract vendor, date, amount, tax, description, invoice #, anomaly
-  └──────────────┘
+  ┌─────────────────────┐
+  │  Clean Text         │  Decode HTML entities, strip invisible Unicode spacers
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Load Rules         │  Fetch vendor rules from DB (skipped if pre-populated)
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  RAG Search         │  Find similar past transactions for anomaly context
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Skip Agent         │  Is this a real completed transaction?
+  └──────────┬──────────┘
+             │ not skipped
+             ▼
+  ┌─────────────────────┐
+  │  Type Agent         │  Income or expense? (regex shortcut for refunds)
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Fields Agent       │  Vendor, date, amount, tax, description, invoice #, anomaly
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Vendor Normalizer  │  Strip legal suffixes, LLM for complex names
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Categorize         │  Rules → history consensus → LLM
+  └─────────────────────┘
 """
 
 import logging
@@ -92,14 +111,18 @@ _SKIP_PROMPT = ChatPromptTemplate.from_messages([
 You are a financial email filter. Decide if this email describes a COMPLETED transaction where money actually changed hands.
 
 Set skip=true for ANY of these (no money moved):
-- Shipping / delivery / tracking / logistics updates
-- Pending or unpaid payments: "waiting for payment", "complete your payment", "abandoned cart", "pro forma invoice"
+- Shipping / delivery / tracking / logistics updates: "your order has shipped", "out for delivery", "delivered", "track your package", "on its way"
+- Pending or unpaid payments: "action required", "waiting for payment", "awaiting initial payment", "complete your payment", "abandoned cart", "pro forma invoice", "on its way to you", "coming soon", "will appear on your statement soon"
   EXCEPTION: a utility bill or subscription invoice with a bill period and amount due IS a real expense
-- Declined or failed payments: "payment declined", "card declined", "could not process", "retry payment", "billing problem"
+- Notifications of a order completion: "order is completed", "write a review"
+- Declined or failed payments: "payment declined", "card declined", "could not process", "retry payment", "billing problem", "unsuccessful", "not suscessful", "failed to charge"
+- Payment status updates without confirmation of a completed charge: "your payment is being processed", "payment status update", "payment status changed"
 - Rewards, gift cards, winnings: "reward points", "gift card", "you've won", "loyalty points", "cashback reward"
 - Marketing or promotional offers: balance transfer offers, loan offers, "get $X eGift card"
 - Account notifications without a charge: password reset, login alert, newsletter
-
+- Statements or balance updates without a specific transaction: "your statement is ready", "your balance is $X", "account update", "your online statement is ready", "statement is now available", "your account statement", "your monthly statement", "your recent account activity"
+- Payments between different accounts you hold: "payment to account", "transfer to your savings account", "transfer from your checking account"
+     
 Set skip=false for:
 - Payment receipts and order / booking confirmations
 - Utility bills and subscription invoices (even if payment is future-dated)
@@ -141,10 +164,10 @@ _TYPE_PROMPT = ChatPromptTemplate.from_messages([
 Classify a financial transaction as income or expense.
 
 expense = money going OUT from you: bill, invoice, receipt, subscription charge, order confirmation
-income  = money coming IN to you: refund, salary, client payment received, payout, deposit
+income  = money coming IN to you: refund, salary, client payment received, payout, deposit, sale of an item
 
 Critical rules:
-- A REFUND is ALWAYS income
+- A REFUND is ALWAYS income, even if the original transaction was an expense. Look for "refund", "payout", "deposit", "sent to you", "tax refund", etc.
 - "payment received" or "we received your payment" means the MERCHANT received money FROM YOU — EXPENSE
 - "Receipt for your payment" or "Thank you for your payment" = EXPENSE
 - A positive dollar amount does NOT mean income — invoices and receipts always show positive amounts
@@ -178,14 +201,18 @@ _FIELDS_PROMPT = ChatPromptTemplate.from_messages([
 Extract transaction fields from a financial document.
 Transaction type is already known: {tx_type}
 
-Number format (Australian documents):
-- Commas are THOUSANDS SEPARATORS: $1,000 = 1000.00   $1,234.56 = 1234.56
-- Never write commas in your output amounts
+Amount rules — this is the most important field:
+- Use the FINAL TOTAL the customer actually paid: look for "Total", "Amount paid", "You've paid", "Grand total", "Amount charged"
+- Prefer the amount that appears last or is labelled "Total" over subtotals, item prices, or quantities
+- NEVER use quantities (Qty: 200), per-unit prices ($0.35), subtotals, postage, or tax as the amount
+- NEVER use ABN numbers, ACN numbers, licence numbers, account numbers, or reference numbers as the amount
+- Commas are thousands separators: $1,234.56 = 1234.56 — never include commas in your output
+- If no clear amount is stated, return 0.0
 
-Date format: always YYYY-MM-DD (e.g. 2024-03-15). Never use slashes or spell out the month.
+Date: always YYYY-MM-DD. Never use slashes or spell out the month.
 
-For invoice_number: look for Order #, Invoice #, Ref, Transaction ID, Confirmation #.
-Do NOT use account numbers, card numbers, or customer IDs.
+invoice_number: Order #, Order ID, Invoice #, Transaction ID, Confirmation #.
+Do NOT use account numbers, card numbers, ABN, or customer IDs.
 
 {similar_hint}
 Return ONLY the JSON object."""),
@@ -225,6 +252,35 @@ async def _fields_agent(state: ExtractionState) -> ExtractionState:
     except Exception as e:
         log.warning("Fields agent failed: %s — marking as skip", e)
         return state.model_copy(update={"skip": True, "skip_reason": f"extraction failed: {e}"})
+
+
+# Invisible Unicode characters used as email spacer tricks.
+# chr() keeps the source file free of invisible characters.
+_INVISIBLE_CHARS = frozenset([
+    chr(0x034F),  # COMBINING GRAPHEME JOINER  (&#847;)
+    chr(0x00AD),  # SOFT HYPHEN
+    chr(0x200B),  # ZERO WIDTH SPACE
+    chr(0x200C),  # ZERO WIDTH NON-JOINER  (&zwnj;)
+    chr(0x200D),  # ZERO WIDTH JOINER
+    chr(0x200E),  # LEFT-TO-RIGHT MARK
+    chr(0x200F),  # RIGHT-TO-LEFT MARK
+    chr(0x202A),  # LEFT-TO-RIGHT EMBEDDING
+    chr(0x202B),  # RIGHT-TO-LEFT EMBEDDING
+    chr(0x202C),  # POP DIRECTIONAL FORMATTING
+    chr(0x202D),  # LEFT-TO-RIGHT OVERRIDE
+    chr(0x202E),  # RIGHT-TO-LEFT OVERRIDE
+    chr(0x2060),  # WORD JOINER
+    chr(0xFEFF),  # BOM / ZERO WIDTH NO-BREAK SPACE
+])
+
+
+def _clean_text_step(state: ExtractionState) -> ExtractionState:
+    """Decode HTML entities and strip invisible Unicode characters used as email spacers."""
+    import html as html_module
+    text = html_module.unescape(state.text)
+    text = ''.join(c for c in text if c not in _INVISIBLE_CHARS)
+    text = re.sub(r"[^\S\n]+", " ", text).strip()
+    return state.model_copy(update={"text": text})
 
 
 async def _load_rules_step(state: ExtractionState) -> ExtractionState:
@@ -285,7 +341,8 @@ async def _categorize_step(state: ExtractionState) -> ExtractionState:
 # ── LCEL pipeline ─────────────────────────────────────────────────────────────
 
 _pipeline = (
-    RunnableLambda(_load_rules_step)
+    RunnableLambda(_clean_text_step)
+    | RunnableLambda(_load_rules_step)
     | RunnableLambda(_rag_search_step)
     | RunnableLambda(_skip_agent)
     | RunnableBranch(

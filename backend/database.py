@@ -20,7 +20,7 @@ def get_db():
 
 
 def init_db():
-    from backend.models import Transaction, EmailAccount, ChatMessage, VendorRule, ATORule  # noqa: F401
+    from backend.models import Transaction, EmailAccount, ChatMessage, VendorRule, ATORule, Attachment  # noqa: F401
     Base.metadata.create_all(bind=engine)
     # Add new columns to existing tables without dropping data
     with engine.connect() as conn:

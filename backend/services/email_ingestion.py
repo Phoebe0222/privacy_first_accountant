@@ -1,4 +1,5 @@
 import email
+import html as html_module
 import re
 from datetime import datetime, timedelta
 from email.header import decode_header
@@ -8,10 +9,6 @@ from bs4 import BeautifulSoup
 from imapclient import IMAPClient
 
 
-FINANCIAL_KEYWORDS = [
-    "invoice", "receipt", "payment", "order", "transaction", "charge",
-    "subscription", "billing", "statement", "purchase", "refund", "deposit",
-]
 
 
 def _parse_email_date(raw: str) -> str:
@@ -59,11 +56,20 @@ def _extract_text(msg: email.message.Message) -> str:
                 plain = payload.decode("utf-8", errors="replace")
 
     if plain:
-        return plain[:6000]
+        return _clean_text(plain)[:6000]
     if html:
         soup = BeautifulSoup(html, "html.parser")
-        return soup.get_text(separator=" ", strip=True)[:6000]
+        return _clean_text(soup.get_text(separator=" ", strip=True))[:6000]
     return ""
+
+
+def _clean_text(text: str) -> str:
+    """Decode HTML entities and strip invisible Unicode spacer characters."""
+    from backend.services.extraction_agent import _INVISIBLE_CHARS
+    text = html_module.unescape(text)
+    text = ''.join(c for c in text if c not in _INVISIBLE_CHARS)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    return text.strip()
 
 
 ATTACHMENT_MIME_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"}
@@ -85,11 +91,6 @@ def _extract_attachments(msg: email.message.Message) -> list[dict]:
         if payload:
             attachments.append({"filename": filename, "mime_type": mime_type, "bytes": payload})
     return attachments
-
-
-def _is_financial(subject: str, body: str) -> bool:
-    combined = (subject + " " + body[:500]).lower()
-    return any(kw in combined for kw in FINANCIAL_KEYWORDS)
 
 
 def fetch_email_headers(

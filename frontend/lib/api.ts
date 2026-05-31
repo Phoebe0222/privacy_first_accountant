@@ -22,6 +22,10 @@ export interface Transaction {
   source: string;
   description?: string;
   invoice_number?: string;
+  anomaly?: boolean;
+  anomaly_reason?: string;
+  needs_review?: boolean;
+  category_confidence?: number;
   created_at: string;
 }
 
@@ -36,7 +40,7 @@ export interface Summary {
 export const api = {
   getSummary: () => req<Summary>("/transactions/summary"),
 
-  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; vendor?: string; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
+  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
     const defined = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );
@@ -69,6 +73,12 @@ export const api = {
 
   getImportHistory: () =>
     req<{ source: string; source_ref: string; count: number; date_from: string; date_to: string; imported_at: string }[]>("/transactions/imports"),
+
+  getReviewQueue: () =>
+    req<{ count: number; items: Transaction[] }>("/transactions/review-queue"),
+
+  getAnomalies: () =>
+    req<{ total: number; items: Transaction[] }>("/transactions?anomaly=true&sort_by=date&sort_dir=desc&limit=100"),
 
   // ── Import ──────────────────────────────────────────────────────────────
 

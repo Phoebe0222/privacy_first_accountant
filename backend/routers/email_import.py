@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal, get_db
 from backend.schemas import EmailAccountCreate
-from backend.models import EmailAccount, Transaction
+from backend.models import Attachment, EmailAccount, Transaction
 from backend.services import rag
 from backend.services.extraction_agent import extract_from_image, extract_from_text
 from backend.services.email_ingestion import fetch_email_headers, fetch_email_bodies
@@ -55,6 +55,12 @@ _NON_FINANCIAL_RE = re.compile(
         r"card declined", r"could not process", r"unable to process your payment",
         r"retry payment", r"update your payment", r"billing problem",
         r"payment issue", r"payment attempt", r"we were unable to charge", r"your payment could not",
+        # Account / statement notifications (no transaction occurred)
+        r"statement\s+is\s+(now\s+)?ready", r"statement\s+is\s+now\s+available",
+        r"your\s+(online\s+)?statement\s+is", r"your\s+account\s+statement",
+        r"account\s+activity\s+(summary|update|notification)",
+        r"your\s+balance\s+is", r"available\s+balance",
+        r"password\s+reset", r"login\s+(alert|notification)", r"sign.?in\s+(alert|attempt)",
         # Promotional / marketing
         r"\bdeals?\b", r"\bspecial offer\b", r"\bflash sale\b", r"\bexclusive offer\b",
         r"\blimited time\b", r"\b\d+%\s*off\b", r"\bfancy a\b",
@@ -234,7 +240,7 @@ async def _run_email_sync(
                 data,
                 source="email",
                 source_ref=f"{account_id}:{em['uid']}",
-                raw_text=em["raw_text"],
+                raw_text=em.get("extracted_text") or em["raw_text"],
                 fallback_date=em["date"] or None,
                 fallback_vendor=em["from"],
                 fallback_description=em["subject"],
@@ -243,6 +249,15 @@ async def _run_email_sync(
             db.add(t)
             db.commit()
             db.refresh(t)
+            for att in em.get("attachments", []):
+                if att.get("bytes"):
+                    db.add(Attachment(
+                        transaction_id=t.id,
+                        filename=att.get("filename") or None,
+                        mime_type=att["mime_type"],
+                        data=att["bytes"],
+                    ))
+            db.commit()
             added_transactions.append(t)
             asyncio.create_task(_index_transactions([t.id]))
             _jobs[job_id] = {"status": "running", "added": len(added_transactions), "total": len(financial_emails)}
@@ -288,6 +303,8 @@ async def _extract_email(
                     if image_text.strip():
                         text = image_text
                         break
+            # Store whatever text was actually used for extraction
+            em["extracted_text"] = text
             label = f"{em.get('from', '')} | {em.get('subject', '').replace(chr(10), ' ')}"
             log.info("AI extracting | %s", label)
             t = time.monotonic()

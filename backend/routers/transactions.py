@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, asc, desc
 from sqlalchemy.orm import Session
 
+from fastapi.responses import Response
 from backend.database import get_db
-from backend.models import Transaction
+from backend.models import Attachment, Transaction
 from backend.schemas import TransactionCreate, TransactionUpdate
 from backend.services import rag
 
@@ -24,6 +25,7 @@ def list_transactions(
     source: Optional[str] = None,
     vendor: Optional[str] = None,
     needs_review: Optional[bool] = None,
+    anomaly: Optional[bool] = None,
     sort_by: str = "date",
     sort_dir: str = "desc",
     limit: int = 200,
@@ -47,6 +49,8 @@ def list_transactions(
         q = q.filter(Transaction.vendor.ilike(f"%{vendor}%"))
     if needs_review is not None:
         q = q.filter(Transaction.needs_review == needs_review)
+    if anomaly is not None:
+        q = q.filter(Transaction.anomaly == anomaly)
     total = q.count()
     col = getattr(Transaction, sort_by if sort_by in SORTABLE_COLUMNS else "date")
     order = desc(col) if sort_dir == "desc" else asc(col)
@@ -121,6 +125,28 @@ async def bulk_delete(source_ref: Optional[str] = None, source: Optional[str] = 
     str_ids = [str(i) for i in ids]
     await asyncio.get_event_loop().run_in_executor(None, lambda: rag._col.delete(ids=str_ids))
     return {"deleted": len(ids)}
+
+
+@router.get("/{transaction_id}/attachments")
+def list_attachments(transaction_id: int, db: Session = Depends(get_db)):
+    atts = db.query(Attachment).filter(Attachment.transaction_id == transaction_id).all()
+    return [{"id": a.id, "filename": a.filename, "mime_type": a.mime_type} for a in atts]
+
+
+@router.get("/{transaction_id}/attachments/{attachment_id}")
+def get_attachment(transaction_id: int, attachment_id: int, db: Session = Depends(get_db)):
+    a = db.query(Attachment).filter(
+        Attachment.id == attachment_id,
+        Attachment.transaction_id == transaction_id,
+    ).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    filename = a.filename or f"attachment_{a.id}"
+    return Response(
+        content=a.data,
+        media_type=a.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.delete("/{transaction_id}")

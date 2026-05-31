@@ -44,7 +44,7 @@ Clean structured data stores locally, both your transactions and the vectors.
 ### 4. Chat and UI
 The UI has a dashboard with cost and revenue, cash flows etc.
 
-The user can ask the agent for numbers, charts, reports etc. 
+The user can ask the agent for numbers, charts, reports etc. and ask the agent to change some transactions. 
 
 ### 5. Bank reconciliation 
 ### 6. Anomaly detection
@@ -112,6 +112,42 @@ Vector DB:
 
 ## Multi-agents framework 
 - ### Extraction agent 
+```
+Extraction pipeline using LangChain LCEL.
+
+  ┌─────────────────────┐
+  │  Clean Text         │  Decode HTML entities, strip invisible Unicode spacers
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Load Rules         │  Fetch vendor rules from DB (skipped if pre-populated)
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  RAG Search         │  Find similar past transactions for anomaly context
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Skip Agent         │  Is this a real completed transaction?
+  └──────────┬──────────┘
+             │ not skipped
+             ▼
+  ┌─────────────────────┐
+  │  Type Agent         │  Income or expense? (regex shortcut for refunds)
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Fields Agent       │  Vendor, date, amount, tax, description, invoice #, anomaly
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Vendor Normalizer  │  Strip legal suffixes, LLM for complex names
+  └──────────┬──────────┘
+             ▼
+  ┌─────────────────────┐
+  │  Categorize         │  Rules → history consensus → LLM
+  └─────────────────────┘
+```
 - ### Categorise agent 
 - ### CSV column mapping agent 
 
