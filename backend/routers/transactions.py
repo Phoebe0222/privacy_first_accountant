@@ -179,7 +179,7 @@ def list_imports(db: Session = Depends(get_db)):
             func.max(Transaction.date).label("date_to"),
             func.max(Transaction.created_at).label("imported_at"),
         )
-        .filter(Transaction.source.in_(["csv", "pdf", "image"]))
+        .filter(Transaction.source.in_(["csv", "bank_csv", "pdf", "image"]))
         .filter(Transaction.source_ref.isnot(None))
         .group_by(Transaction.source, Transaction.source_ref)
         .order_by(func.max(Transaction.created_at).desc())

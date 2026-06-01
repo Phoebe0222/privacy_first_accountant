@@ -65,6 +65,10 @@ export default function ImportPage() {
   const [csvUploading, setCsvUploading] = useState(false);
   const [csvResult, setCsvResult] = useState<string>("");
   const [lastCsvFile, setLastCsvFile] = useState<string | null>(null);
+  const bankCsvRef = useRef<HTMLInputElement>(null);
+  const [bankCsvUploading, setBankCsvUploading] = useState(false);
+  const [bankCsvResult, setBankCsvResult] = useState<string>("");
+  const [lastBankCsvFile, setLastBankCsvFile] = useState<string | null>(null);
   const [importHistory, setImportHistory] = useState<{ source: string; source_ref: string; count: number; date_from: string; date_to: string; imported_at: string }[]>([]);
 
   function loadImportHistory() {
@@ -181,6 +185,33 @@ export default function ImportPage() {
     } finally {
       setCsvUploading(false);
       removeCsvJob();
+    }
+  }
+
+  async function handleBankCsvUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (bankCsvRef.current) bankCsvRef.current.value = "";
+    setBankCsvUploading(true);
+    setBankCsvResult("");
+    setLastBankCsvFile(file.name);
+    let jobId: string;
+    try {
+      const res = await api.startBankCsvUpload(file);
+      jobId = res.job_id;
+    } catch (err: unknown) {
+      setBankCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setBankCsvUploading(false);
+      return;
+    }
+    try {
+      const r = await api.pollJob(jobId);
+      setBankCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
+      loadImportHistory();
+    } catch (err: unknown) {
+      setBankCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBankCsvUploading(false);
     }
   }
 
@@ -315,12 +346,66 @@ export default function ImportPage() {
       </section>
 
       {/* CSV upload */}
+      {/* ── Bank Statement CSV ── */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-gray-700">Bank / Stripe / PayPal CSV Export</h3>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-700">Bank Statement CSV</h3>
+            <p className="text-xs text-gray-400 mt-0.5">ANZ, CommBank, Westpac, NAB — used for reconciliation</p>
+          </div>
           <button
             onClick={async () => {
-              if (!confirm("Delete ALL CSV-imported transactions? This cannot be undone.")) return;
+              if (!confirm("Delete ALL bank CSV transactions? This cannot be undone.")) return;
+              try {
+                const r = await api.deleteBySource("bank_csv");
+                setBankCsvResult(`Removed ${r.deleted} bank transactions.`);
+                setLastBankCsvFile(null);
+              } catch (e: unknown) {
+                setBankCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            }}
+            className="text-xs text-red-400 hover:text-red-600 underline"
+          >Clear all</button>
+        </div>
+        <div className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+          <input ref={bankCsvRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleBankCsvUpload} className="hidden" id="bank-csv-upload" />
+          <label htmlFor="bank-csv-upload"
+            className="cursor-pointer bg-gray-800 text-white px-5 py-2 rounded-lg text-sm hover:bg-gray-700 transition-colors">
+            {bankCsvUploading ? "Processing…" : "Choose Bank Statement CSV"}
+          </label>
+        </div>
+        {bankCsvResult && (
+          <div className="flex items-center gap-3">
+            <p className={`text-sm ${bankCsvResult.startsWith("Error") ? "text-red-500" : "text-green-600"}`}>{bankCsvResult}</p>
+            {lastBankCsvFile && !bankCsvResult.startsWith("Error") && (
+              <button
+                onClick={async () => {
+                  if (!confirm(`Remove all transactions imported from "${lastBankCsvFile}"?`)) return;
+                  try {
+                    const r = await api.deleteBySourceRef(lastBankCsvFile);
+                    setBankCsvResult(`Removed ${r.deleted} transactions from "${lastBankCsvFile}".`);
+                    setLastBankCsvFile(null);
+                  } catch (e: unknown) {
+                    setBankCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+                  }
+                }}
+                className="text-xs text-red-400 hover:text-red-600 underline whitespace-nowrap"
+              >Remove import</button>
+            )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Receipt / Marketplace CSV ── */}
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-700">Receipt / Marketplace CSV</h3>
+            <p className="text-xs text-gray-400 mt-0.5">PayPal, Stripe, Etsy, Shopify — treated as receipts</p>
+          </div>
+          <button
+            onClick={async () => {
+              if (!confirm("Delete ALL receipt CSV transactions? This cannot be undone.")) return;
               try {
                 const r = await api.deleteBySource("csv");
                 setCsvResult(`Removed ${r.deleted} CSV transactions.`);
@@ -334,7 +419,6 @@ export default function ImportPage() {
             Clear all CSV
           </button>
         </div>
-        <p className="text-sm text-gray-400">Upload any CSV export — the AI will detect the columns automatically.</p>
         <div className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
           <input ref={csvRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleCsvUpload} className="hidden" id="csv-upload" />
           <label htmlFor="csv-upload"
@@ -366,45 +450,6 @@ export default function ImportPage() {
         )}
       </section>
 
-      {importHistory.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium text-gray-500">Import History</h4>
-          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-            <table className="w-full text-sm">
-              <tbody className="divide-y divide-gray-50">
-                {importHistory.map((h) => (
-                  <tr key={h.source_ref} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-gray-700 truncate max-w-xs">{h.source_ref}</p>
-                      <p className="text-xs text-gray-400">{h.date_from} — {h.date_to}</p>
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs capitalize">{h.source}</td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{h.count} transactions</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={async () => {
-                          if (!confirm(`Remove all ${h.count} transactions from "${h.source_ref}"?`)) return;
-                          try {
-                            const r = await api.deleteBySourceRef(h.source_ref);
-                            setCsvResult(`Removed ${r.deleted} transactions from "${h.source_ref}".`);
-                            loadImportHistory();
-                          } catch (e: unknown) {
-                            setCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
-                          }
-                        }}
-                        className="text-xs text-gray-300 hover:text-red-500 transition-colors"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {/* File upload */}
       <section className="space-y-4">
         <h3 className="text-lg font-semibold text-gray-700">Upload PDF or Receipt Photo</h3>
@@ -421,6 +466,48 @@ export default function ImportPage() {
           <p className={`text-sm ${uploadResult.startsWith("Error") ? "text-red-500" : "text-green-600"}`}>{uploadResult}</p>
         )}
       </section>
+
+      {/* ── Import History (all sources) ── */}
+      {importHistory.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-500">Import History</h4>
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-50">
+                {importHistory.map((h) => (
+                  <tr key={h.source_ref} className="hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-gray-700 truncate max-w-xs">{h.source_ref}</p>
+                      <p className="text-xs text-gray-400">{h.date_from} — {h.date_to}</p>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${h.source === "bank_csv" ? "bg-gray-100 text-gray-600" : "bg-blue-50 text-blue-600"}`}>
+                        {h.source === "bank_csv" ? "Bank CSV" : h.source}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">{h.count} transactions</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Remove all ${h.count} transactions from "${h.source_ref}"?`)) return;
+                          try {
+                            const r = await api.deleteBySourceRef(h.source_ref);
+                            setCsvResult(`Removed ${r.deleted} transactions from "${h.source_ref}".`);
+                            loadImportHistory();
+                          } catch (e: unknown) {
+                            setCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+                          }
+                        }}
+                        className="text-xs text-gray-300 hover:text-red-500 transition-colors"
+                      >Remove</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

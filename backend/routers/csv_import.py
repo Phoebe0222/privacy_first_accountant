@@ -20,23 +20,32 @@ router = APIRouter(prefix="/import", tags=["import"])
 
 @router.post("/csv")
 async def upload_csv(file: UploadFile = File(...)):
+    """Import a receipt/marketplace CSV (PayPal, Stripe, Etsy, etc.)."""
+    return await _start_csv_job(file, source="csv")
+
+
+@router.post("/bank-csv")
+async def upload_bank_csv(file: UploadFile = File(...)):
+    """Import a bank statement CSV (ANZ, CommBank, Westpac, etc.)."""
+    return await _start_csv_job(file, source="bank_csv")
+
+
+async def _start_csv_job(file: UploadFile, source: str):
     file_bytes = await file.read()
     filename = file.filename or "upload.csv"
-
     try:
         headers, rows = parse_csv(file_bytes, filename)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Could not parse file: {e}")
     if not headers:
         raise HTTPException(status_code=400, detail="File has no headers.")
-
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running"}
-    asyncio.create_task(_run_csv(job_id, headers, rows, filename))
+    asyncio.create_task(_run_csv(job_id, headers, rows, filename, source=source))
     return {"job_id": job_id, "status": "running"}
 
 
-async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
+async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source: str = "csv"):
     try:
         mapping = await map_csv_columns(headers, rows[:5])
         log.info("CSV MAPPING | %s", mapping)
@@ -108,7 +117,7 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
                     data = {**tx, "category": cat["category"],
                             "needs_review": cat["needs_review"],
                             "category_confidence": cat["confidence"]}
-                t = _build_transaction(data, source="csv", source_ref=filename, raw_text="")
+                t = _build_transaction(data, source=source, source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1
             db.commit()

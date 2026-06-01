@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useState } from "react";
-import { api, Transaction } from "@/lib/api";
+import { api, Transaction, ReconciliationMatch } from "@/lib/api";
 
 const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 const FORM_CATEGORIES = CATEGORIES.filter((c) => c !== "all");
@@ -40,8 +40,9 @@ export default function TransactionsPage() {
   const [dateRange, setDateRange] = useState<"all" | "custom" | string>(`fy:${fyStartYear()}`);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [source, setSource] = useState("");
+  const [source, setSource] = useState("bank_csv");
   const [vendor, setVendor] = useState("");
+  const [matchMap, setMatchMap] = useState<Record<number, ReconciliationMatch>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense", description: "" });
   const [sourceId, setSourceId] = useState<number | null>(null);
@@ -56,10 +57,16 @@ export default function TransactionsPage() {
     const fy = FY_OPTIONS.find((o) => o.value === dateRange);
     const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
     const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
-    api
-      .getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, vendor: vendor || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE })
-      .then(({ items, total }) => { setItems(items); setTotal(total); })
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, vendor: vendor || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
+      api.getReconciliationMatches(),
+    ]).then(([{ items, total }, matches]) => {
+      setItems(items);
+      setTotal(total);
+      const map: Record<number, ReconciliationMatch> = {};
+      for (const m of matches) if (m.bank?.id) map[m.bank.id] = m;
+      setMatchMap(map);
+    }).finally(() => setLoading(false));
   }
 
   function resetAndLoad() { setPage(1); load(1); }
@@ -210,15 +217,6 @@ export default function TransactionsPage() {
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" />
           </>
         )}
-        <select value={source} onChange={(e) => setSource(e.target.value)}
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
-          <option value="">All sources</option>
-          <option value="email">Email</option>
-          <option value="csv">CSV</option>
-          <option value="pdf">PDF</option>
-          <option value="image">Image</option>
-          <option value="manual">Manual</option>
-        </select>
         <input
           type="text"
           placeholder="Vendor…"
@@ -237,12 +235,13 @@ export default function TransactionsPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
               <tr>
-                {(["date", "vendor", "category", "type", "source"] as (keyof Transaction)[]).map((col) => (
+                {(["date", "vendor", "category", "type"] as (keyof Transaction)[]).map((col) => (
                   <th key={col} className="px-4 py-3 text-left cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort(col)}>
                     {col}{sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                   </th>
                 ))}
                 <th className="px-4 py-3 text-left text-gray-500">description</th>
+                <th className="px-4 py-3 text-left text-gray-500">reconcile</th>
                 <th className="px-4 py-3 text-right cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort("amount")}>
                   Amount{sortCol === "amount" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                 </th>
@@ -304,8 +303,6 @@ export default function TransactionsPage() {
                       )}
                     </td>
 
-                    <td className="px-4 py-3 text-gray-400 capitalize">{t.source}</td>
-
                     <td className="px-4 py-3 text-gray-500 max-w-xs">
                       {editing ? (
                         <input
@@ -316,6 +313,31 @@ export default function TransactionsPage() {
                       ) : (
                         <span className="text-xs truncate block">{t.description ?? ""}</span>
                       )}
+                    </td>
+
+                    <td className="px-4 py-3 text-xs max-w-[160px]">
+                      {(() => {
+                        const m = matchMap[t.id];
+                        if (!m) return <span className="text-gray-300">—</span>;
+                        const label = m.receipt?.vendor ?? "Receipt";
+                        if (m.status === "confirmed")
+                          return <span className="text-green-600 font-medium truncate block" title={label}>✓ {label}</span>;
+                        return (
+                          <span className="flex items-center gap-1">
+                            <span className="text-amber-500 truncate" title={label}>~ {label}</span>
+                            <button
+                              onClick={async () => { await api.updateMatch(m.id, "confirmed"); load(page); }}
+                              className="text-xs text-gray-300 hover:text-green-600 shrink-0"
+                              title="Confirm match"
+                            >✓</button>
+                            <button
+                              onClick={async () => { await api.updateMatch(m.id, "rejected"); load(page); }}
+                              className="text-xs text-gray-300 hover:text-red-500 shrink-0"
+                              title="Reject match"
+                            >✕</button>
+                          </span>
+                        );
+                      })()}
                     </td>
 
                     <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>

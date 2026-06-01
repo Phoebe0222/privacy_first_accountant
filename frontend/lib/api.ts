@@ -134,6 +134,12 @@ export const api = {
     return req<{ job_id: string }>("/import/csv", { method: "POST", body: form });
   },
 
+  startBankCsvUpload: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return req<{ job_id: string }>("/import/bank-csv", { method: "POST", body: form });
+  },
+
   // ── Vendor rules ────────────────────────────────────────────────────────
 
   getVendorRules: () => req<{ id: number; vendor_pattern: string; category: string }[]>("/vendor-rules"),
@@ -177,7 +183,54 @@ export const api = {
     req<{ role: string; content: string; created_at: string }[]>("/chat/history"),
 
   clearChatHistory: () => req<{ ok: boolean }>("/chat/history", { method: "DELETE" }),
+
+  // ── Reconciliation ───────────────────────────────────────────────────────
+
+  getReconciliationSummary: () =>
+    req<{ total_bank: number; total_receipts: number; matched: number; unmatched_bank: number; unmatched_receipts: number }>("/reconciliation/summary"),
+
+  getReconciliationMatches: (status?: string) =>
+    req<ReconciliationMatch[]>(`/reconciliation/matches${status ? "?status=" + status : ""}`),
+
+  runAutoReconcile: () =>
+    req<{ new_matches: number; unmatched_bank: number; unmatched_receipts: number }>("/reconciliation/run", { method: "POST" }),
+
+  createMatch: (bank_tx_id: number, receipt_tx_id: number) =>
+    req<ReconciliationMatch>("/reconciliation/matches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bank_tx_id, receipt_tx_id }),
+    }),
+
+  updateMatch: (match_id: number, status: "confirmed" | "rejected") =>
+    req<ReconciliationMatch>(`/reconciliation/matches/${match_id}?status=${status}`, { method: "PATCH" }),
+
+  deleteMatch: (match_id: number) =>
+    req<{ ok: boolean }>(`/reconciliation/matches/${match_id}`, { method: "DELETE" }),
+
+  getUnmatchedBank: () => req<TxSummary[]>("/reconciliation/unmatched/bank"),
+  getUnmatchedReceipts: () => req<TxSummary[]>("/reconciliation/unmatched/receipts"),
 };
+
+export interface TxSummary {
+  id: number;
+  date: string;
+  vendor: string;
+  amount: number;
+  type: string;
+  category: string;
+  source: string;
+  description?: string;
+}
+
+export interface ReconciliationMatch {
+  id: number;
+  bank: TxSummary | null;
+  receipt: TxSummary | null;
+  confidence: number;
+  status: "auto" | "confirmed" | "rejected";
+  created_at: string;
+}
 
 export interface EmailAccount {
   id: number;

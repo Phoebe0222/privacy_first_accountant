@@ -14,11 +14,13 @@ BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("menulog", "food"),
     ("deliveroo", "food"),
     ("mcdonald", "food"),
-    ("starbucks", "food"),
-    ("woolworths", "food"),
-    ("coles", "food"),
-    ("aldi", "food"),
-    ("iga supermarket", "food"),
+
+    ("starbucks", "cafe"),
+    
+    ("woolworths", "grocery"),
+    ("coles", "grocery"),
+    ("aldi", "grocery"),
+    ("iga supermarket", "grocery"),
 
     ("uber", "transport"),
     ("lyft", "transport"),
@@ -29,8 +31,10 @@ BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("amazon web services", "software"),
     ("microsoft azure", "software"),
     ("google cloud", "software"),
+
     ("facebook ads", "marketing"),
     ("google ads", "marketing"),
+    
     ("australia post", "utilities"),
     ("origin energy", "utilities"),
     ("energy australia", "utilities"),

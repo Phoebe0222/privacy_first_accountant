@@ -75,3 +75,14 @@ class ATORule(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ReconciliationMatch(Base):
+    __tablename__ = "reconciliation_matches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bank_tx_id = Column(Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True)
+    receipt_tx_id = Column(Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=False, index=True)
+    confidence = Column(Float, nullable=False)
+    status = Column(String, default="auto")  # "auto" | "confirmed" | "rejected"
+    created_at = Column(DateTime, default=datetime.utcnow)
