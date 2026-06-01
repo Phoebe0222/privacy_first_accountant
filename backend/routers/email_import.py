@@ -14,7 +14,7 @@ from backend.models import Attachment, EmailAccount, Transaction
 from backend.services import rag
 from backend.services.extraction_agent import extract_from_image, extract_from_text
 from backend.services.email_ingestion import fetch_email_headers, fetch_email_bodies
-from backend.services.pdf_ingestion import extract_text_from_pdf, normalise_image
+from backend.services.file_ingestion import extract_text_from_pdf, normalise_image
 from backend.routers._import_helpers import (
     _jobs,
     _is_content_duplicate, _to_float, _build_transaction, _index_transactions,

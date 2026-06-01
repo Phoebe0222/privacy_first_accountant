@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.services.extraction_agent import extract_from_image, extract_from_text
-from backend.services.pdf_ingestion import extract_text_from_pdf, is_image_file, is_pdf_file, normalise_image
+from backend.services.file_ingestion import extract_text_from_pdf, is_image_file, is_pdf_file, normalise_image
 from backend.routers._import_helpers import (
     _jobs, _to_float, _build_transaction, _index_transactions,
 )

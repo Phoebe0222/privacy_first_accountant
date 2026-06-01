@@ -1,14 +1,17 @@
 """
 Vendor name normalisation.
 
-Step 1 — deterministic rules: strip legal suffixes and domain parts.
-Step 2 — RAG history: if past transactions agree on a canonical name, use it.
-Step 3 — LLM fallback: only when RAG has no match and the name is still complex.
+Step 1 — payment processor unwrapping: "PAYPAL *AIAUMARKETS 4029357733 AUS" → "AIAUMARKETS"
+Step 2 — deterministic rules: strip legal suffixes and domain parts.
+Step 3 — RAG history: if past transactions agree on a canonical name, use it.
+Step 4 — LLM fallback: only when RAG has no match and the name is still complex.
 
 Results are cached in-process so each raw name is resolved at most once.
 
 Examples
 --------
+"PAYPAL *AIAUMARKETS 4029357733 AUS"              → "Aiau Markets"
+"STRIPE *SOME COMPANY"                            → "Some Company"
 "alibaba"                                         → "Alibaba"
 "AIAU MARKETS PTY LTD"                            → "AIAU Markets"
 "Alibaba.com Singapore E-commerce Pte Ltd"        → "Alibaba"  (via RAG or LLM)
@@ -26,6 +29,27 @@ from langchain_core.prompts import ChatPromptTemplate
 from backend.services.utils import get_llm
 
 log = logging.getLogger(__name__)
+
+# ── Payment processor unwrapping ─────────────────────────────────────────────
+# "PAYPAL *MERCHANT 4029357733 AUS" → "MERCHANT"
+# "STRIPE *SOME CO" → "SOME CO"
+
+_PROCESSOR_PREFIX_RE = re.compile(
+    r"^(?:paypal|stripe|sq|sp|payme|afterpay)\s*\*\s*",
+    re.IGNORECASE,
+)
+_TRAILING_PHONE_RE = re.compile(
+    r"\s+\d[\d\s]{5,}[A-Z]{0,3}\s*$",  # phone number + optional country code
+)
+
+
+def _unwrap_processor(raw: str) -> str:
+    """Strip payment processor prefix and trailing phone/country noise."""
+    unwrapped = _PROCESSOR_PREFIX_RE.sub("", raw)
+    if unwrapped == raw:
+        return raw
+    return _TRAILING_PHONE_RE.sub("", unwrapped).strip()
+
 
 # ── Rule-based cleanup ────────────────────────────────────────────────────────
 
@@ -124,7 +148,9 @@ async def normalize_vendor(raw: str) -> str:
     if raw in _cache:
         return _cache[raw]
 
-    cleaned = _rule_clean(raw)
+    # Step 1: unwrap payment processor prefix ("PAYPAL *MERCHANT ..." → "MERCHANT")
+    unwrapped = _unwrap_processor(raw)
+    cleaned = _rule_clean(unwrapped)
     if not cleaned:
         cleaned = raw
 
