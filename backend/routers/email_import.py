@@ -298,7 +298,8 @@ async def _extract_email(
                     if pdf_text.strip():
                         text = pdf_text
                         break
-                elif att["mime_type"] in _IMAGE_MIMES:
+                elif att["mime_type"] in _IMAGE_MIMES and att.get("is_attachment", True):
+                    # Skip inline images (logos, icons) — only use explicit file attachments
                     image_text = await extract_from_image(normalise_image(att["bytes"]))
                     if image_text.strip():
                         text = image_text

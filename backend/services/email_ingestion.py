@@ -89,7 +89,13 @@ def _extract_attachments(msg: email.message.Message) -> list[dict]:
             continue
         payload = part.get_payload(decode=True)
         if payload:
-            attachments.append({"filename": filename, "mime_type": mime_type, "bytes": payload})
+            is_attachment = "attachment" in disposition
+            attachments.append({
+                "filename": filename,
+                "mime_type": mime_type,
+                "bytes": payload,
+                "is_attachment": is_attachment,  # False = inline (logo/icon), True = real file
+            })
     return attachments
 
 

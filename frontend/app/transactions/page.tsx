@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api, Transaction } from "@/lib/api";
 
 const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
@@ -256,7 +256,8 @@ export default function TransactionsPage() {
               {items.map((t) => {
                 const editing = editingId === t.id;
                 return (
-                  <tr key={t.id} className={`transition-colors ${editing ? "bg-blue-50" : "hover:bg-gray-50"}`}>
+                  <React.Fragment key={t.id}>
+                  <tr className={`transition-colors ${editing ? "bg-blue-50" : "hover:bg-gray-50"}`}>
                     <td className="px-4 py-3 text-gray-600">{t.date}</td>
 
                     <td className="px-4 py-3">
@@ -379,6 +380,7 @@ export default function TransactionsPage() {
                       </td>
                     </tr>
                   )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
