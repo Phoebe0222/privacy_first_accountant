@@ -200,8 +200,11 @@ def list_imports(db: Session = Depends(get_db)):
 
 @router.get("/summary")
 def summary(db: Session = Depends(get_db)):
-    total_income = db.query(func.sum(Transaction.amount)).filter(Transaction.type == "income").scalar() or 0
-    total_expenses = db.query(func.sum(Transaction.amount)).filter(Transaction.type == "expense").scalar() or 0
+    # P&L is based on bank transactions only to avoid double-counting receipts
+    bank_filter = Transaction.source == "bank_csv"
+
+    total_income = db.query(func.sum(Transaction.amount)).filter(bank_filter, Transaction.type == "income").scalar() or 0
+    total_expenses = db.query(func.sum(Transaction.amount)).filter(bank_filter, Transaction.type == "expense").scalar() or 0
 
     monthly = (
         db.query(
@@ -209,6 +212,7 @@ def summary(db: Session = Depends(get_db)):
             Transaction.type,
             func.sum(Transaction.amount).label("total"),
         )
+        .filter(bank_filter)
         .group_by("month", Transaction.type)
         .order_by("month")
         .all()
@@ -216,7 +220,7 @@ def summary(db: Session = Depends(get_db)):
 
     by_category = (
         db.query(Transaction.category, func.sum(Transaction.amount).label("total"))
-        .filter(Transaction.type == "expense")
+        .filter(bank_filter, Transaction.type == "expense")
         .group_by(Transaction.category)
         .all()
     )
