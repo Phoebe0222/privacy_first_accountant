@@ -39,6 +39,8 @@ export default function ReceiptsPage() {
   const [vendor, setVendor] = useState("");
   const [receiptSource, setReceiptSource] = useState("");
   const [matchMap, setMatchMap] = useState<Record<number, ReconciliationMatch>>({});
+  const [sourceId, setSourceId] = useState<number | null>(null);
+  const [sourceText, setSourceText] = useState<string>("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
@@ -62,6 +64,13 @@ export default function ReceiptsPage() {
 
   useEffect(() => { setPage(1); load(1); }, [type, category, dateRange, customFrom, customTo, vendor, receiptSource]);
   useEffect(() => { load(page); }, [page]);
+
+  async function toggleSource(id: number) {
+    if (sourceId === id) { setSourceId(null); return; }
+    const res = await api.getSourceText(id);
+    setSourceText(res.raw_text);
+    setSourceId(id);
+  }
 
   return (
     <div className="space-y-6">
@@ -123,33 +132,57 @@ export default function ReceiptsPage() {
                 <th className="px-4 py-3 text-left">Source</th>
                 <th className="px-4 py-3 text-left">Matched to</th>
                 <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {items.map((t) => {
                 const m = matchMap[t.id];
                 return (
-                  <tr key={t.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-600">{t.date}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{t.vendor}</td>
-                    <td className="px-4 py-3 text-gray-500 capitalize">{t.category}</td>
-                    <td className="px-4 py-3">
-                      <span className={`text-xs font-medium px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
-                        {t.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{SOURCE_LABELS[t.source] ?? t.source}</td>
-                    <td className="px-4 py-3 text-xs max-w-[140px]">
-                      {m ? (
-                        <span className={m.status === "confirmed" ? "text-green-600 font-medium truncate block" : "text-amber-500 truncate block"} title={m.bank?.vendor ?? ""}>
-                          {m.status === "confirmed" ? "✓" : "~"} {m.bank?.vendor ?? "—"}
+                  <React.Fragment key={t.id}>
+                    <tr className="hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-600">{t.date}</td>
+                      <td className="px-4 py-3 font-medium text-gray-800">{t.vendor}</td>
+                      <td className="px-4 py-3 text-gray-500 capitalize">{t.category}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                          {t.type}
                         </span>
-                      ) : <span className="text-gray-300">—</span>}
-                    </td>
-                    <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
-                      {fmt(t.amount)}
-                    </td>
-                  </tr>
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{SOURCE_LABELS[t.source] ?? t.source}</td>
+                      <td className="px-4 py-3 text-xs max-w-[140px]">
+                        {m ? (
+                          <span className={m.status === "confirmed" ? "text-green-600 font-medium truncate block" : "text-amber-500 truncate block"} title={m.bank?.vendor ?? ""}>
+                            {m.status === "confirmed" ? "✓" : "~"} {m.bank?.vendor ?? "—"}
+                          </span>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
+                        {fmt(t.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => toggleSource(t.id)}
+                          className={`text-xs transition-colors ${sourceId === t.id ? "text-blue-500 font-medium" : "text-gray-300 hover:text-blue-400"}`}
+                        >{sourceId === t.id ? "▲ Close" : "Source"}</button>
+                      </td>
+                    </tr>
+                    {sourceId === t.id && (
+                      <tr className="bg-gray-50">
+                        <td colSpan={8} className="px-4 pb-3 pt-1">
+                          <div className="flex justify-end mb-1">
+                            <button
+                              onClick={() => setSourceId(null)}
+                              className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+                            >▲ Close</button>
+                          </div>
+                          <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-64 overflow-y-auto bg-white border border-gray-100 rounded p-3 font-mono leading-relaxed">
+                            {sourceText || "(no source text)"}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>

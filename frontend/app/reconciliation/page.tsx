@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api, ReconciliationMatch } from "@/lib/api";
 
 function fmt(n: number) {
@@ -175,13 +175,39 @@ export default function ReconciliationPage() {
   );
 }
 
+type TxRow = { id: number; date: string; vendor: string; amount: number; type: string; description?: string };
+
 function UnmatchedBank() {
-  const [items, setItems] = useState<{ id: number; date: string; vendor: string; amount: number; type: string }[]>([]);
-  useEffect(() => { api.getUnmatchedBank().then(setItems); }, []);
-  function fmt(n: number) { return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n); }
+  const [items, setItems] = useState<TxRow[]>([]);
+  const [receipts, setReceipts] = useState<TxRow[]>([]);
+  const [matchingId, setMatchingId] = useState<number | null>(null);
+  const [receiptFilter, setReceiptFilter] = useState("");
+
+  function fmtAud(n: number) { return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n); }
+
+  function load() {
+    Promise.all([api.getUnmatchedBank(), api.getUnmatchedReceipts()])
+      .then(([b, r]) => { setItems(b); setReceipts(r); });
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function createMatch(bankId: number, receiptId: number) {
+    await api.createMatch(bankId, receiptId);
+    setMatchingId(null);
+    setReceiptFilter("");
+    load();
+  }
+
+  const filteredReceipts = receipts.filter((r) => {
+    const q = receiptFilter.toLowerCase();
+    return !q || r.vendor.toLowerCase().includes(q) || String(r.amount).includes(q);
+  });
+
   if (items.length === 0) return <p className="text-gray-400 text-sm">All bank transactions are matched.</p>;
+
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
@@ -189,16 +215,71 @@ function UnmatchedBank() {
             <th className="px-4 py-3 text-left">Vendor</th>
             <th className="px-4 py-3 text-right">Amount</th>
             <th className="px-4 py-3 text-left">Type</th>
+            <th className="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-50">
           {items.map((t) => (
-            <tr key={t.id} className="hover:bg-gray-50">
-              <td className="px-4 py-3 text-gray-600">{t.date}</td>
-              <td className="px-4 py-3 font-medium text-gray-800">{t.vendor}</td>
-              <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>{fmt(t.amount)}</td>
-              <td className="px-4 py-3"><span className={`text-xs px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{t.type}</span></td>
-            </tr>
+            <React.Fragment key={t.id}>
+              <tr className={matchingId === t.id ? "bg-blue-50" : "hover:bg-gray-50"}>
+                <td className="px-4 py-3 text-gray-600">{t.date}</td>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-gray-800">{t.vendor}</p>
+                  {t.description && t.description !== t.vendor && (
+                    <p className="text-xs text-gray-400 truncate max-w-xs">{t.description}</p>
+                  )}
+                </td>
+                <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>{fmtAud(t.amount)}</td>
+                <td className="px-4 py-3">
+                  <span className={`text-xs px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{t.type}</span>
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => { setMatchingId(matchingId === t.id ? null : t.id); setReceiptFilter(""); }}
+                    className={`text-xs font-medium transition-colors ${matchingId === t.id ? "text-blue-600" : "text-gray-300 hover:text-blue-500"}`}
+                  >
+                    {matchingId === t.id ? "Cancel" : "Match"}
+                  </button>
+                </td>
+              </tr>
+
+              {matchingId === t.id && (
+                <tr className="bg-blue-50">
+                  <td colSpan={5} className="px-4 pb-4 pt-1">
+                    <p className="text-xs text-blue-600 font-medium mb-2">Select a receipt to match with {t.vendor} ({fmtAud(t.amount)})</p>
+                    <input
+                      type="text"
+                      placeholder="Filter receipts by vendor or amount…"
+                      value={receiptFilter}
+                      onChange={(e) => setReceiptFilter(e.target.value)}
+                      className="w-full border border-blue-200 rounded-lg px-3 py-1.5 text-xs mb-2 bg-white"
+                      autoFocus
+                    />
+                    {filteredReceipts.length === 0 ? (
+                      <p className="text-xs text-gray-400">No unmatched receipts found.</p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto rounded-lg border border-gray-100 bg-white divide-y divide-gray-50">
+                        {filteredReceipts.map((r) => (
+                          <button
+                            key={r.id}
+                            onClick={() => createMatch(t.id, r.id)}
+                            className="w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors flex items-center justify-between"
+                          >
+                            <span>
+                              <span className="font-medium text-gray-800 text-xs">{r.vendor}</span>
+                              <span className="text-gray-400 text-xs ml-2">{r.date}</span>
+                            </span>
+                            <span className={`text-xs font-medium ${r.type === "income" ? "text-green-600" : "text-gray-700"}`}>
+                              {fmtAud(r.amount)}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>

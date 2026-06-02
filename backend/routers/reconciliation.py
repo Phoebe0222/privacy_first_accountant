@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.models import ReconciliationMatch, Transaction
-from backend.services.reconciliation_agent import get_summary, run_auto_reconcile
+from backend.services.reconciliation_matcher import get_summary, run_auto_reconcile
 
 router = APIRouter(prefix="/reconciliation", tags=["reconciliation"])
 
@@ -17,9 +17,11 @@ def _serialize_tx(t: Transaction) -> dict:
     }
 
 
-def _serialize_match(m: ReconciliationMatch, db: Session) -> dict:
-    bank = db.get(Transaction, m.bank_tx_id)
-    receipt = db.get(Transaction, m.receipt_tx_id)
+def _serialize_match(m: ReconciliationMatch, db: Session, bank: Transaction | None = None, receipt: Transaction | None = None) -> dict:
+    if bank is None:
+        bank = db.get(Transaction, m.bank_tx_id)
+    if receipt is None:
+        receipt = db.get(Transaction, m.receipt_tx_id)
     return {
         "id": m.id,
         "bank": _serialize_tx(bank) if bank else None,
@@ -52,7 +54,22 @@ def list_matches(status: str | None = None, db: Session = Depends(get_db)):
     if status:
         q = q.filter(ReconciliationMatch.status == status)
     matches = q.order_by(ReconciliationMatch.confidence.desc()).all()
-    return [_serialize_match(m, db) for m in matches]
+
+    result = []
+    stale_ids = []
+    for m in matches:
+        bank = db.get(Transaction, m.bank_tx_id)
+        receipt = db.get(Transaction, m.receipt_tx_id)
+        if bank and receipt:
+            result.append(_serialize_match(m, db, bank=bank, receipt=receipt))
+        else:
+            stale_ids.append(m.id)
+
+    if stale_ids:
+        db.query(ReconciliationMatch).filter(ReconciliationMatch.id.in_(stale_ids)).delete(synchronize_session=False)
+        db.commit()
+
+    return result
 
 
 class MatchCreate(BaseModel):

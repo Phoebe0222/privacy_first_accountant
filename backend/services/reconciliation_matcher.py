@@ -24,8 +24,8 @@ from backend.models import ReconciliationMatch, Transaction
 log = logging.getLogger(__name__)
 
 AMOUNT_TOLERANCE = 0.01   # cents rounding
-DATE_WINDOW_DAYS = 7
-AUTO_MATCH_THRESHOLD = 0.8
+DATE_WINDOW_DAYS = 14     # covers PayPal (5 business days) and international settlements
+AUTO_MATCH_THRESHOLD = 0.75
 
 
 # ── Vendor similarity ─────────────────────────────────────────────────────────
@@ -48,7 +48,7 @@ def _vendor_similarity(v1: str, v2: str) -> float:
 
 
 def _date_score(d1: str, d2: str) -> float:
-    """Score date proximity: same day = 1.0, ≤3 days = 0.9, ≤7 days = 0.8, else 0."""
+    """Score date proximity: same day = 1.0, ≤3 days = 0.9, ≤7 days = 0.8, ≤14 days = 0.7, else 0."""
     try:
         delta = abs((datetime.strptime(d1, "%Y-%m-%d") - datetime.strptime(d2, "%Y-%m-%d")).days)
     except (ValueError, TypeError):
@@ -57,8 +57,10 @@ def _date_score(d1: str, d2: str) -> float:
         return 1.0
     if delta <= 3:
         return 0.9
-    if delta <= DATE_WINDOW_DAYS:
+    if delta <= 7:
         return 0.8
+    if delta <= DATE_WINDOW_DAYS:
+        return 0.7
     return 0.0
 
 
@@ -71,10 +73,14 @@ def find_best_match(
 ) -> Optional[tuple[Transaction, float]]:
     """
     Find the best matching receipt for a bank transaction.
-    Returns (receipt, confidence) or None if no match above threshold.
+
+    Strategy:
+    - Amount + date are the required signals (amount match is exact, date within window).
+    - Vendor similarity is a tiebreaker when multiple candidates share the same amount+date.
+    - If only ONE candidate passes amount+date, it's a match regardless of vendor name
+      (covers PayPal/Stripe where bank=processor, receipt=merchant).
     """
-    best: Optional[Transaction] = None
-    best_score = 0.0
+    candidates: list[tuple[Transaction, float, float]] = []  # (receipt, d_score, v_score)
 
     for r in receipts:
         if r.id in already_matched:
@@ -83,20 +89,29 @@ def find_best_match(
             continue
         if abs((r.amount or 0) - (bank_tx.amount or 0)) > AMOUNT_TOLERANCE:
             continue
-
         d_score = _date_score(bank_tx.date or "", r.date or "")
         if d_score == 0.0:
             continue
-
         v_score = _vendor_similarity(bank_tx.vendor or "", r.vendor or "")
-        confidence = round((d_score + v_score) / 2, 3)
+        candidates.append((r, d_score, v_score))
 
-        if confidence > best_score:
-            best_score = confidence
-            best = r
+    if not candidates:
+        return None
 
-    if best and best_score >= AUTO_MATCH_THRESHOLD:
-        return best, best_score
+    # Single candidate: amount+date is sufficient — vendor mismatch is expected for
+    # PayPal/Stripe where the bank records the processor, not the merchant.
+    if len(candidates) == 1:
+        r, d_score, v_score = candidates[0]
+        # Blend date score with a small vendor bonus; minimum 0.75 for single match
+        confidence = round(max(d_score * 0.8 + v_score * 0.2, 0.75), 3)
+        return r, confidence
+
+    # Multiple candidates: use vendor similarity to pick the best
+    best = max(candidates, key=lambda c: (c[2], c[1]))  # sort by v_score then d_score
+    r, d_score, v_score = best
+    confidence = round(d_score * 0.5 + v_score * 0.5, 3)
+    if confidence >= AUTO_MATCH_THRESHOLD:
+        return r, confidence
     return None
 
 
@@ -123,7 +138,7 @@ def run_auto_reconcile(db: Session, source_ref: str | None = None) -> dict:
     bank_txs = bank_q.all()
 
     receipts = db.query(Transaction).filter(
-        Transaction.source.in_(["email", "pdf", "image"]),
+        Transaction.source.in_(["email", "pdf", "image", "csv"]),
         ~Transaction.id.in_(matched_receipt_ids),
     ).all()
 
