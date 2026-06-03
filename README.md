@@ -159,7 +159,7 @@ Extraction pipeline using LangChain LCEL.
 - anomaly detection
 - monthly summaries
 - User define rules from UI -- deterministic
-- bank reconciliation
+- bank reconciliation -- auto and manual
 ### Phase 2
 - BAS estimation
 - deduction recommendations
