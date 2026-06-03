@@ -17,6 +17,7 @@ def list_transactions(
     type: Optional[str] = None,
     category: Optional[str] = None,
     month: Optional[str] = None,
+    anomaly: Optional[bool] = None,
     limit: int = 200,
     offset: int = 0,
     db: Session = Depends(get_db),
@@ -28,6 +29,8 @@ def list_transactions(
         q = q.filter(Transaction.category == category)
     if month:
         q = q.filter(Transaction.date.like(f"{month}%"))
+    if anomaly is not None:
+        q = q.filter(Transaction.anomaly == anomaly)
     total = q.count()
     items = q.order_by(Transaction.date.desc()).offset(offset).limit(limit).all()
     return {"total": total, "items": [_serialize(t) for t in items]}
@@ -61,6 +64,18 @@ async def update_transaction(
         await rag.index_transaction(t)
     except Exception:
         pass
+    return _serialize(t)
+
+
+@router.post("/{transaction_id}/dismiss-anomaly")
+def dismiss_anomaly(transaction_id: int, db: Session = Depends(get_db)):
+    t = db.get(Transaction, transaction_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    t.anomaly = False
+    t.anomaly_reason = None
+    db.commit()
+    db.refresh(t)
     return _serialize(t)
 
 
@@ -121,5 +136,6 @@ def _serialize(t: Transaction) -> dict:
         "invoice_number": t.invoice_number,
         "anomaly": t.anomaly or False,
         "anomaly_reason": t.anomaly_reason,
+        "business": t.business if t.business is not None else True,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }

@@ -42,3 +42,18 @@ class TransactionUpdate(BaseModel):
     type: Optional[str] = None
     description: Optional[str] = None
     invoice_number: Optional[str] = None
+    business: Optional[bool] = None
+
+
+class DeductionRuleCreate(BaseModel):
+    user_type: str
+    category: str
+    rate: float
+    label: str
+    note: Optional[str] = None
+
+
+class DeductionRuleUpdate(BaseModel):
+    rate: Optional[float] = None
+    label: Optional[str] = None
+    note: Optional[str] = None

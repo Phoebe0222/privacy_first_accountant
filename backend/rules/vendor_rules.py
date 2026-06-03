@@ -1,6 +1,6 @@
 VALID_CATEGORIES = frozenset({
     "food", "transport", "utilities", "software", "marketing",
-    "revenue", "salary", "office", "subscription", "other",
+    "revenue", "salary", "office", "subscription", "home_office", "other",
 })
 
 # Sorted longest-first so more specific patterns win (e.g. "uber eats" before "uber")

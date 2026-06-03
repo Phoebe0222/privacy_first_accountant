@@ -71,6 +71,11 @@ export default function TransactionsPage() {
     load();
   }
 
+  async function handleBusinessToggle(id: number, current: boolean) {
+    await api.updateTransaction(id, { business: !current });
+    load();
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -165,6 +170,7 @@ export default function TransactionsPage() {
                     {col}{sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                   </th>
                 ))}
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-wide">Purpose</th>
                 <th className="px-4 py-3 text-right cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort("amount")}>
                   Amount{sortCol === "amount" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                 </th>
@@ -190,11 +196,25 @@ export default function TransactionsPage() {
                       <option value="expense">expense</option>
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-gray-400 capitalize">{t.source}</td>
+                  <td className="px-4 py-3 text-gray-400 capitalize">{t.source === "bank_csv" ? "bank csv" : t.source}</td>
                   <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
                     {fmt(t.amount)}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-400">{t.tax ? fmt(t.tax) : "—"}</td>
+                  <td className="px-4 py-3">
+                    {t.source === "bank_csv" || t.source === "manual" ? (
+                      <button
+                        onClick={() => handleBusinessToggle(t.id, t.business ?? true)}
+                        className={`text-xs font-medium px-2 py-0.5 rounded ${
+                          t.business !== false ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"
+                        }`}
+                      >
+                        {t.business !== false ? "Business" : "Personal"}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400 italic">Reconciliation</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => handleDelete(t.id)} className="text-gray-300 hover:text-red-500 transition-colors text-xs">
                       Delete

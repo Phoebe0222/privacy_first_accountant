@@ -13,13 +13,14 @@ class Transaction(Base):
     tax = Column(Float, default=0.0)
     category = Column(String, index=True)
     type = Column(String)  # "income" or "expense"
-    source = Column(String)  # "email", "pdf", "image", "manual"
+    source = Column(String)  # "email", "pdf", "image", "manual", "csv", "bank_csv"
     source_ref = Column(String, nullable=True)
     description = Column(String, nullable=True)
     invoice_number = Column(String, nullable=True)
     raw_text = Column(Text, nullable=True)
     anomaly = Column(Boolean, default=False, nullable=True)
     anomaly_reason = Column(String, nullable=True)
+    business = Column(Boolean, default=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -53,3 +54,21 @@ class VendorRule(Base):
     vendor_pattern = Column(String, nullable=False)
     category = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DeductionRule(Base):
+    __tablename__ = "deduction_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_type = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=False)
+    rate = Column(Float, nullable=False)
+    label = Column(String, nullable=False)
+    note = Column(String, nullable=True)
+
+
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=True)

@@ -388,7 +388,7 @@ async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db
 
 # --- csv -----------------------
 @router.post("/csv")
-async def upload_csv(file: UploadFile = File(...)):
+async def upload_csv(csv_type: str = "supplier", file: UploadFile = File(...)):
     file_bytes = await file.read()
     filename = file.filename or "upload.csv"
 
@@ -399,13 +399,14 @@ async def upload_csv(file: UploadFile = File(...)):
     if not headers:
         raise HTTPException(status_code=400, detail="File has no headers.")
 
+    source = "bank_csv" if csv_type == "bank" else "csv"
     job_id = str(uuid.uuid4())
     _jobs[job_id] = {"status": "running"}
-    asyncio.create_task(_run_csv(job_id, headers, rows, filename))
+    asyncio.create_task(_run_csv(job_id, headers, rows, filename, source))
     return {"job_id": job_id, "status": "running"}
 
 
-async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
+async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source: str = "csv"):
     try:
         mapping = await map_csv_columns(headers, rows[:5])
         transactions = apply_mapping(rows, mapping)
@@ -431,7 +432,7 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str):
                     category=vendor_categories.get(tx["vendor"]) or tx["category"] or "other",
                     description=tx["description"],
                     invoice_number=tx["invoice_number"],
-                    source="csv",
+                    source=source,
                     source_ref=filename,
                 )
                 db.add(t)

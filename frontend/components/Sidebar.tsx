@@ -6,6 +6,9 @@ const links = [
   { href: "/", label: "Dashboard", icon: "📊" },
   { href: "/transactions", label: "Transactions", icon: "💳" },
   { href: "/import", label: "Import", icon: "📥" },
+  { href: "/anomalies", label: "Anomalies", icon: "⚠️" },
+  { href: "/bas", label: "BAS / GST", icon: "🧾" },
+  { href: "/deductions", label: "Deductions", icon: "💰" },
   { href: "/chat", label: "Chat", icon: "💬" },
 ];
 

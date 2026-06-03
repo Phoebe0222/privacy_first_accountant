@@ -20,6 +20,7 @@ export default function ImportPage() {
   const csvRef = useRef<HTMLInputElement>(null);
   const [csvUploading, setCsvUploading] = useState(false);
   const [csvResult, setCsvResult] = useState<string>("");
+  const [csvType, setCsvType] = useState<"bank" | "supplier">("bank");
 
   function loadAccounts() {
     api.getEmailAccounts().then(setAccounts).catch(() => {});
@@ -56,8 +57,9 @@ export default function ImportPage() {
     setCsvUploading(true);
     setCsvResult("");
     try {
-      const r = await api.uploadCsv(file);
-      setCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
+      const r = await api.uploadCsv(file, csvType);
+      const label = csvType === "bank" ? "bank statement" : "supplier/processor";
+      setCsvResult(`Done: ${r.added} transactions imported from ${label}, ${r.skipped} rows skipped.`);
     } catch (err: unknown) {
       setCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -188,8 +190,37 @@ export default function ImportPage() {
 
       {/* CSV upload */}
       <section className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-700">Bank / Stripe / PayPal CSV Export</h3>
+        <h3 className="text-lg font-semibold text-gray-700">CSV Import</h3>
         <p className="text-sm text-gray-400">Upload any CSV export — the AI will detect the columns automatically.</p>
+
+        <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm space-y-3">
+          <p className="text-sm font-medium text-gray-700">What type of CSV is this?</p>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setCsvType("bank")}
+              className={`flex-1 text-sm px-4 py-2.5 rounded-lg border transition-colors ${
+                csvType === "bank"
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              🏦 Bank Statement
+              <span className="block text-xs mt-0.5 opacity-75">Primary record — used in BAS & deductions</span>
+            </button>
+            <button
+              onClick={() => setCsvType("supplier")}
+              className={`flex-1 text-sm px-4 py-2.5 rounded-lg border transition-colors ${
+                csvType === "supplier"
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              🏪 Supplier / Processor
+              <span className="block text-xs mt-0.5 opacity-75">Stripe, PayPal, Shopify, etc. — reconciliation only</span>
+            </button>
+          </div>
+        </div>
+
         <div className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
           <input ref={csvRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleCsvUpload} className="hidden" id="csv-upload" />
           <label htmlFor="csv-upload"
