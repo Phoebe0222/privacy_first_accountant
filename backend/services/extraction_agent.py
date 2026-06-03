@@ -288,16 +288,15 @@ async def _load_rules_step(state: ExtractionState) -> ExtractionState:
         return state
     from backend.database import SessionLocal
     from backend.models import VendorRule
-    from backend.services.vendor_rules import BUILT_IN_RULES
     db = SessionLocal()
     try:
-        user_rules = db.query(VendorRule).all()
-        user_pairs = sorted(
-            [(r.vendor_pattern.lower().strip(), r.category) for r in user_rules],
+        all_rules = db.query(VendorRule).all()
+        rules = sorted(
+            [(r.vendor_pattern.lower().strip(), r.category) for r in all_rules],
             key=lambda x: len(x[0]),
             reverse=True,
         )
-        return state.model_copy(update={"rules": user_pairs + BUILT_IN_RULES})
+        return state.model_copy(update={"rules": rules})
     finally:
         db.close()
 

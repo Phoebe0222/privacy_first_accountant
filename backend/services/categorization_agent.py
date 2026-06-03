@@ -66,7 +66,7 @@ class LLMCategorizationResult(BaseModel):
 def _apply_rules(state: CategorizationState) -> CategorizationState:
     if state.category is not None:
         return state
-    from backend.rules.vendor_rules import INCOME_CATEGORIES
+    from backend.services.constants import INCOME_CATEGORIES
     text = f"{state.vendor} {state.description}".lower()
     for pattern, category in state.rules:
         if pattern.lower() in text:
@@ -168,7 +168,7 @@ async def _llm_categorize(state: CategorizationState) -> CategorizationState:
             "history_hint": f"History hint: {state.history_summary}\n" if state.history_summary else "",
         })
 
-        from backend.rules.vendor_rules import VALID_CATEGORIES
+        from backend.services.constants import VALID_CATEGORIES
         category = result.category if result.category in VALID_CATEGORIES else "other"
         confidence = max(0.0, min(1.0, result.confidence))
         if category == "other" and result.category != "other":

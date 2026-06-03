@@ -70,9 +70,12 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
         try:
             category_rules = _load_category_rules(db)
 
-            # Deduplicate vendors that need categorisation
+            # Deduplicate vendors that need categorisation.
+            # Transfers (transfer-in / transfer-out) are typed by regex — skip LLM categorisation.
             pending: dict[str, tuple[str, str, float, str]] = {}
             for tx in transactions:
+                if tx.get("type") in ("transfer-in", "transfer-out"):
+                    continue
                 csv_category = tx.get("category") or ""
                 if csv_category and csv_category != "other":
                     continue

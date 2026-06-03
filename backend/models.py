@@ -22,6 +22,7 @@ class Transaction(Base):
     anomaly_reason = Column(String, nullable=True)
     needs_review = Column(Boolean, default=False, nullable=True)
     category_confidence = Column(Float, nullable=True)
+    business = Column(Boolean, default=False, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -65,6 +66,7 @@ class VendorRule(Base):
     id = Column(Integer, primary_key=True, index=True)
     vendor_pattern = Column(String, nullable=False)
     category = Column(String, nullable=False)
+    built_in = Column(Boolean, default=False, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -75,6 +77,24 @@ class ATORule(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DeductionRule(Base):
+    __tablename__ = "deduction_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_type = Column(String, nullable=False)   # "individual_salary" | "individual_abn" | "small_business"
+    category = Column(String, nullable=False)
+    rate = Column(Float, nullable=False)          # 0.0–1.0
+    label = Column(String, nullable=False)
+    note = Column(String, nullable=True)
+
+
+class AppSettings(Base):
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=True)
 
 
 class ReconciliationMatch(Base):

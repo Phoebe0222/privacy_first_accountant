@@ -9,6 +9,8 @@ from backend.routers._import_helpers import router as import_jobs_router
 from backend.routers.email_import import router as email_import_router
 from backend.routers.file_import import router as file_import_router
 from backend.routers.csv_import import router as csv_import_router
+from backend.routers.bas import router as bas_router
+from backend.routers.deductions import router as deductions_router
 from backend.routers.reconciliation import router as reconciliation_router
 from backend.routers.rag_router import router as rag_router
 from backend.routers.vendor_rules import router as vendor_rules_router
@@ -35,6 +37,8 @@ app.include_router(email_import_router)
 app.include_router(file_import_router)
 app.include_router(csv_import_router)
 app.include_router(chat.router)
+app.include_router(bas_router)
+app.include_router(deductions_router)
 app.include_router(reconciliation_router)
 app.include_router(rag_router)
 app.include_router(vendor_rules_router)

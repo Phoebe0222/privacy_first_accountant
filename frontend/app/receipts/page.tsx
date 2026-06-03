@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { api, Transaction, ReconciliationMatch } from "@/lib/api";
+import VendorRulesTab from "@/components/VendorRulesTab";
 
 const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 
@@ -28,6 +29,7 @@ function fmt(n: number) {
 const SOURCE_LABELS: Record<string, string> = { email: "Email", pdf: "PDF", image: "Image" };
 
 export default function ReceiptsPage() {
+  const [pageTab, setPageTab] = useState<"receipts" | "rules">("receipts");
   const [items, setItems] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [type, setType] = useState("");
@@ -75,10 +77,26 @@ export default function ReceiptsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Receipts <span className="text-base font-normal text-gray-400">({total})</span></h2>
+        <h2 className="text-2xl font-bold text-gray-800">
+          {pageTab === "receipts"
+            ? <>Receipts <span className="text-base font-normal text-gray-400">({total})</span></>
+            : "Vendor Rules"}
+        </h2>
+        <div className="flex gap-2">
+          <button onClick={() => setPageTab("receipts")}
+            className={`text-sm px-4 py-2 rounded-lg border transition-colors ${pageTab === "receipts" ? "bg-gray-800 text-white border-gray-800" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+            Receipts
+          </button>
+          <button onClick={() => setPageTab("rules")}
+            className={`text-sm px-4 py-2 rounded-lg border transition-colors ${pageTab === "rules" ? "bg-gray-800 text-white border-gray-800" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+            Vendor Rules
+          </button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-3 items-center">
+      {pageTab === "rules" && <VendorRulesTab />}
+
+      {pageTab === "receipts" && <div className="flex flex-wrap gap-3 items-center">
         <select value={type} onChange={(e) => setType(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
           <option value="">All types</option>
@@ -114,9 +132,9 @@ export default function ReceiptsPage() {
         </select>
         <input type="text" placeholder="Vendor…" value={vendor} onChange={(e) => setVendor(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white w-36" />
-      </div>
+      </div>}
 
-      {loading ? (
+      {pageTab === "receipts" && loading ? (
         <p className="text-gray-400">Loading…</p>
       ) : items.length === 0 ? (
         <p className="text-gray-400">No receipts yet. Import emails or PDFs from the Import page.</p>

@@ -6,6 +6,25 @@ from backend.services.utils import normalise_date as _normalise_date, DATE_RE as
 
 _TRANSFER_CATEGORY_RE = re.compile(r"\binternal\s+transfer|\btransfer\s+out\b|\btransfer\s+in\b", re.IGNORECASE)
 
+# Descriptions that indicate a transfer between own accounts.
+# Rows are NOT skipped — they're imported with type="transfer" so they can be reconciled.
+_TRANSFER_RE = re.compile(
+    r"\bfunds?\s+tfer\b|\bfunds?\s+transfer\b"
+    r"|\binternal\s+transfer\b|\bown\s+transfer\b"
+    r"|\bm-?banking\s+(funds?\s+)?(tfer|transfer)\b"
+    r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)\b"
+    r"|\bbpay\b.{0,40}\bcredit\s+card\b"
+    r"|\bbpay\s+payment\b"
+    r"|\bcredit\s+card\s+(payment|repayment)\b"
+    r"|\bcc\s+payment\b|\bcard\s+repayment\b"
+    r"|\bvisa\s+(payment|repayment|direct\s+debit)\b"
+    r"|\bmastercard\s+(payment|repayment|direct\s+debit)\b"
+    r"|\bamex\s+(payment|repayment)\b"
+    r"|\bpayment\s+thank\s+you\b"
+    r"|\bpayment\s+received\s+-\s+thank\s+you\b",
+    re.IGNORECASE,
+)
+
 
 def _looks_like_data_row(row: list[str]) -> bool:
     """Return True if the first row appears to be data rather than headers."""
@@ -157,6 +176,12 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
         category_raw = get("category") or ""
         if _TRANSFER_CATEGORY_RE.search(category_raw):
             continue
+
+        # Detect inter-account transfers — keep them but reclassify the direction:
+        #   income  → transfer-in  (e.g. payment received from own savings)
+        #   expense → transfer-out (e.g. BPAY credit card repayment, funds transfer)
+        if _TRANSFER_RE.search(vendor) or _TRANSFER_RE.search(description):
+            tx_type = "transfer-in" if tx_type == "income" else "transfer-out"
 
         transactions.append({
             "date": _normalise_date(date),

@@ -8,9 +8,11 @@ const links = [
   { href: "/receipts", label: "Receipts", icon: "🧾" },
   { href: "/reconciliation", label: "Reconcile", icon: "🔗" },
   { href: "/review", label: "Review", icon: "🔍" },
+  { href: "/anomalies", label: "Anomalies", icon: "⚠️" },
+  { href: "/bas", label: "BAS / GST", icon: "🧾" },
+  { href: "/deductions", label: "Deductions", icon: "💰" },
   { href: "/import", label: "Import", icon: "📥" },
   { href: "/chat", label: "Chat", icon: "💬" },
-  { href: "/rules", label: "Rules", icon: "🏷️" },
 ];
 
 export default function Sidebar() {

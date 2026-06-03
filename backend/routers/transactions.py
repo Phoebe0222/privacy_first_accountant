@@ -93,6 +93,18 @@ async def update_transaction(
     return _serialize(t)
 
 
+@router.post("/{transaction_id}/dismiss-anomaly")
+async def dismiss_anomaly(transaction_id: int, db: Session = Depends(get_db)):
+    t = db.get(Transaction, transaction_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    t.anomaly = False
+    t.anomaly_reason = None
+    db.commit()
+    db.refresh(t)
+    return _serialize(t)
+
+
 @router.get("/review-queue")
 def review_queue(db: Session = Depends(get_db)):
     """Return transactions flagged for category review, lowest confidence first."""
@@ -200,11 +212,27 @@ def list_imports(db: Session = Depends(get_db)):
 
 @router.get("/summary")
 def summary(db: Session = Depends(get_db)):
-    # P&L is based on bank transactions only to avoid double-counting receipts
-    bank_filter = Transaction.source == "bank_csv"
+    # Only bank_csv transactions — no double-counting with receipts
+    bank = Transaction.source == "bank_csv"
+    biz = Transaction.business == True   # noqa: E712
+    personal = Transaction.business == False  # noqa: E712
 
-    total_income = db.query(func.sum(Transaction.amount)).filter(bank_filter, Transaction.type == "income").scalar() or 0
-    total_expenses = db.query(func.sum(Transaction.amount)).filter(bank_filter, Transaction.type == "expense").scalar() or 0
+    def _sum(extra_filters):
+        return db.query(func.sum(Transaction.amount)).filter(bank, *extra_filters).scalar() or 0
+
+    def _by_cat(extra_filters):
+        rows = (
+            db.query(Transaction.category, func.sum(Transaction.amount).label("total"))
+            .filter(bank, *extra_filters)
+            .group_by(Transaction.category)
+            .all()
+        )
+        return [{"category": c, "total": round(t, 2)} for c, t in rows]
+
+    biz_income = _sum([biz, Transaction.type == "income"])
+    biz_expenses = _sum([biz, Transaction.type == "expense"])
+    personal_expenses = _sum([personal, Transaction.type == "expense"])
+    personal_income = _sum([personal, Transaction.type == "income"])
 
     monthly = (
         db.query(
@@ -212,25 +240,28 @@ def summary(db: Session = Depends(get_db)):
             Transaction.type,
             func.sum(Transaction.amount).label("total"),
         )
-        .filter(bank_filter)
+        .filter(bank, biz)
         .group_by("month", Transaction.type)
         .order_by("month")
         .all()
     )
 
-    by_category = (
-        db.query(Transaction.category, func.sum(Transaction.amount).label("total"))
-        .filter(bank_filter, Transaction.type == "expense")
-        .group_by(Transaction.category)
-        .all()
-    )
-
     return {
-        "total_income": round(total_income, 2),
-        "total_expenses": round(total_expenses, 2),
-        "net_profit": round(total_income - total_expenses, 2),
+        # Overall (business only, for P&L / BAS)
+        "total_income": round(biz_income, 2),
+        "total_expenses": round(biz_expenses, 2),
+        "net_profit": round(biz_income - biz_expenses, 2),
         "monthly": [{"month": m, "type": tp, "total": round(tot, 2)} for m, tp, tot in monthly],
-        "by_category": [{"category": c, "total": round(t, 2)} for c, t in by_category],
+        "by_category": _by_cat([biz, Transaction.type == "expense"]),
+        # Business breakdown
+        "business_income": round(biz_income, 2),
+        "business_expenses": round(biz_expenses, 2),
+        "business_net": round(biz_income - biz_expenses, 2),
+        "by_category_business": _by_cat([biz, Transaction.type == "expense"]),
+        # Personal breakdown
+        "personal_expenses": round(personal_expenses, 2),
+        "personal_income": round(personal_income, 2),
+        "by_category_personal": _by_cat([personal, Transaction.type == "expense"]),
     }
 
 
@@ -250,5 +281,6 @@ def _serialize(t: Transaction) -> dict:
         "anomaly_reason": t.anomaly_reason,
         "needs_review": t.needs_review or False,
         "category_confidence": t.category_confidence,
+        "business": t.business if t.business is not None else False,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }

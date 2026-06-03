@@ -4,23 +4,24 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.models import VendorRule
 from backend.schemas import VendorRuleCreate
-from backend.services.vendor_rules import BUILT_IN_RULES, VALID_CATEGORIES
+from backend.services.constants import VALID_CATEGORIES
 
 router = APIRouter(prefix="/vendor-rules", tags=["vendor-rules"])
 
 
 def _serialize(r: VendorRule) -> dict:
-    return {"id": r.id, "vendor_pattern": r.vendor_pattern, "category": r.category}
+    return {"id": r.id, "vendor_pattern": r.vendor_pattern, "category": r.category, "built_in": bool(r.built_in)}
 
 
 @router.get("/built-in")
-def list_built_in():
-    return [{"vendor_pattern": p, "category": c} for p, c in BUILT_IN_RULES]
+def list_built_in(db: Session = Depends(get_db)):
+    rules = db.query(VendorRule).filter(VendorRule.built_in == True).order_by(VendorRule.vendor_pattern).all()  # noqa: E712
+    return [_serialize(r) for r in rules]
 
 
 @router.get("")
 def list_rules(db: Session = Depends(get_db)):
-    rules = db.query(VendorRule).order_by(VendorRule.vendor_pattern).all()
+    rules = db.query(VendorRule).filter(VendorRule.built_in != True).order_by(VendorRule.vendor_pattern).all()  # noqa: E712
     return [_serialize(r) for r in rules]
 
 
@@ -34,7 +35,7 @@ def create_rule(body: VendorRuleCreate, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"Invalid category. Must be one of: {', '.join(sorted(VALID_CATEGORIES))}",
         )
-    rule = VendorRule(vendor_pattern=pattern, category=body.category)
+    rule = VendorRule(vendor_pattern=pattern, category=body.category, built_in=False)
     db.add(rule)
     db.commit()
     db.refresh(rule)
@@ -46,6 +47,8 @@ def delete_rule(rule_id: int, db: Session = Depends(get_db)):
     rule = db.get(VendorRule, rule_id)
     if not rule:
         raise HTTPException(status_code=404, detail="Rule not found")
+    if rule.built_in:
+        raise HTTPException(status_code=400, detail="Built-in rules cannot be deleted")
     db.delete(rule)
     db.commit()
     return {"ok": True}

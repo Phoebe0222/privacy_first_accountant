@@ -18,7 +18,7 @@ export interface Transaction {
   amount: number;
   tax: number;
   category: string;
-  type: "income" | "expense";
+  type: "income" | "expense" | "transfer" | "transfer-in" | "transfer-out";
   source: string;
   description?: string;
   invoice_number?: string;
@@ -26,6 +26,7 @@ export interface Transaction {
   anomaly_reason?: string;
   needs_review?: boolean;
   category_confidence?: number;
+  business?: boolean;
   created_at: string;
 }
 
@@ -35,6 +36,13 @@ export interface Summary {
   net_profit: number;
   monthly: { month: string; type: string; total: number }[];
   by_category: { category: string; total: number }[];
+  business_income: number;
+  business_expenses: number;
+  business_net: number;
+  by_category_business: { category: string; total: number }[];
+  personal_expenses: number;
+  personal_income: number;
+  by_category_personal: { category: string; total: number }[];
 }
 
 export const api = {
@@ -64,6 +72,9 @@ export const api = {
 
   deleteTransaction: (id: number) =>
     req<{ ok: boolean }>(`/transactions/${id}`, { method: "DELETE" }),
+
+  dismissAnomaly: (id: number) =>
+    req<Transaction>(`/transactions/${id}/dismiss-anomaly`, { method: "POST" }),
 
   getSourceText: (id: number) =>
     req<{ id: number; source: string; source_ref: string | null; raw_text: string }>(`/transactions/${id}/source`),
@@ -184,6 +195,38 @@ export const api = {
 
   clearChatHistory: () => req<{ ok: boolean }>("/chat/history", { method: "DELETE" }),
 
+  // ── Deductions ──────────────────────────────────────────────────────────
+
+  getDeductionSettings: () => req<{ user_type: string }>("/deductions/settings"),
+  updateDeductionSettings: (user_type: string) =>
+    req<{ user_type: string }>("/deductions/settings", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_type }),
+    }),
+  getDeductionRules: (user_type: string) =>
+    req<DeductionRule[]>(`/deductions/rules?user_type=${user_type}`),
+  createDeductionRule: (data: Omit<DeductionRule, "id">) =>
+    req<DeductionRule>("/deductions/rules", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  updateDeductionRule: (id: number, data: { rate?: number; label?: string; note?: string }) =>
+    req<DeductionRule>(`/deductions/rules/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  deleteDeductionRule: (id: number) =>
+    req<{ ok: boolean }>(`/deductions/rules/${id}`, { method: "DELETE" }),
+  resetDeductionRules: (user_type: string) =>
+    req<DeductionRule[]>(`/deductions/rules/reset?user_type=${user_type}`, { method: "POST" }),
+  getDeductionsEstimate: (year: number) =>
+    req<DeductionsEstimate>(`/deductions/estimate?year=${year}`),
+
+  // ── BAS ─────────────────────────────────────────────────────────────────
+
+  getBas: (year: number, quarter: string) =>
+    req<BasResult>(`/bas?year=${year}&quarter=${quarter}`),
+
   // ── Reconciliation ───────────────────────────────────────────────────────
 
   getReconciliationSummary: () =>
@@ -211,6 +254,47 @@ export const api = {
   getUnmatchedBank: () => req<TxSummary[]>("/reconciliation/unmatched/bank"),
   getUnmatchedReceipts: () => req<TxSummary[]>("/reconciliation/unmatched/receipts"),
 };
+
+export interface DeductionRule {
+  id: number;
+  user_type: string;
+  category: string;
+  rate: number;
+  label: string;
+  note?: string;
+}
+
+export interface DeductionItem {
+  category: string;
+  label: string;
+  total_spent: number;
+  rate: number;
+  deductible_amount: number;
+  note?: string;
+}
+
+export interface DeductionsEstimate {
+  year: number;
+  period: string;
+  date_range: string;
+  user_type: string;
+  items: DeductionItem[];
+  total_deductible: number;
+  total_expenses: number;
+}
+
+export interface BasResult {
+  period: string;
+  date_range: string;
+  G1: number;
+  G11: number;
+  tax_1A: number;
+  tax_1B: number;
+  net_gst: number;
+  transaction_count: number;
+  gst_registration_warning: boolean;
+  annualised_income: number;
+}
 
 export interface TxSummary {
   id: number;

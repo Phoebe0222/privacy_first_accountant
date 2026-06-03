@@ -127,6 +127,7 @@ def unmatched_bank(db: Session = Depends(get_db)):
     }
     txs = db.query(Transaction).filter(
         Transaction.source == "bank_csv",
+        ~Transaction.type.in_(["transfer-in", "transfer-out"]),
         ~Transaction.id.in_(matched_ids) if matched_ids else True,
     ).order_by(Transaction.date.desc()).all()
     return [_serialize_tx(t) for t in txs]

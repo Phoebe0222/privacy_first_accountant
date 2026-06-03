@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.models import Transaction, VendorRule
 from backend.services import rag
-from backend.services.vendor_rules import BUILT_IN_RULES, INCOME_CATEGORIES
+from backend.services.constants import INCOME_CATEGORIES
 
 log = logging.getLogger(__name__)
 
@@ -33,14 +33,13 @@ def get_job(job_id: str):
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
 def _load_category_rules(db) -> list[tuple[str, str]]:
-    """Merge user-defined rules (highest priority) with built-in rules, longest-first."""
-    user_rules = db.query(VendorRule).all()
-    user_pairs = sorted(
-        [(r.vendor_pattern.lower().strip(), r.category) for r in user_rules],
+    """Return all vendor rules sorted longest-first (built-in and user-defined are all in DB)."""
+    all_rules = db.query(VendorRule).all()
+    return sorted(
+        [(r.vendor_pattern.lower().strip(), r.category) for r in all_rules],
         key=lambda x: len(x[0]),
         reverse=True,
     )
-    return user_pairs + BUILT_IN_RULES
 
 
 def _is_content_duplicate(db: Session, data: dict) -> bool:

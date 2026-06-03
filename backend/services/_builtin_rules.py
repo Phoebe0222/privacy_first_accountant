@@ -1,13 +1,5 @@
-VALID_CATEGORIES = frozenset({
-    "food", "grocery", "transport", "travel", "utilities", "software", "marketing",
-    "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure",
-    "material", "fee", "cafe", "gym", "medical", "other",
-})
+"""Built-in vendor → category rules. Seeded into the vendor_rules DB table on first startup."""
 
-INCOME_CATEGORIES = frozenset({"salary", "revenue", "refund"})
-# these are built-in rules, which will be overridden by user-defined rules if there are any conflicts.
-# They are used as a fallback for categorisation when no user-defined rules match, and also to provide examples of how rules can be defined.
-# Sorted longest-first so more specific patterns win (e.g. "uber eats" before "uber")
 BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("uber eats", "food"),
     ("doordash", "food"),
@@ -16,7 +8,7 @@ BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("mcdonald", "food"),
 
     ("starbucks", "cafe"),
-    
+
     ("woolworths", "grocery"),
     ("coles", "grocery"),
     ("aldi", "grocery"),
@@ -34,7 +26,7 @@ BUILT_IN_RULES: list[tuple[str, str]] = sorted([
 
     ("facebook ads", "marketing"),
     ("google ads", "marketing"),
-    
+
     ("australia post", "utilities"),
     ("origin energy", "utilities"),
     ("energy australia", "utilities"),

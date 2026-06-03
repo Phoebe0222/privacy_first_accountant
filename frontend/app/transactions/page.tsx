@@ -1,6 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { api, Transaction, ReconciliationMatch } from "@/lib/api";
+import VendorRulesTab from "@/components/VendorRulesTab";
 
 const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 const FORM_CATEGORIES = CATEGORIES.filter((c) => c !== "all");
@@ -28,6 +29,7 @@ function fmt(n: number) {
 }
 
 export default function TransactionsPage() {
+  const [pageTab, setPageTab] = useState<"transactions" | "rules">("transactions");
   const [items, setItems] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [type, setType] = useState("");
@@ -44,7 +46,7 @@ export default function TransactionsPage() {
   const [vendor, setVendor] = useState("");
   const [matchMap, setMatchMap] = useState<Record<number, ReconciliationMatch>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense", description: "" });
+  const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense" | "transfer" | "transfer-in" | "transfer-out", description: "" });
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
@@ -120,14 +122,32 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-800">Transactions <span className="text-base font-normal text-gray-400">({total})</span></h2>
-        <button onClick={() => setShowForm(!showForm)}
-          className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
-          + Add
-        </button>
+        <h2 className="text-2xl font-bold text-gray-800">
+          {pageTab === "transactions"
+            ? <>Transactions <span className="text-base font-normal text-gray-400">({total})</span></>
+            : "Vendor Rules"}
+        </h2>
+        <div className="flex gap-2">
+          {pageTab === "transactions" && (
+            <button onClick={() => setShowForm(!showForm)}
+              className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+              + Add
+            </button>
+          )}
+          <button onClick={() => setPageTab("transactions")}
+            className={`text-sm px-4 py-2 rounded-lg border transition-colors ${pageTab === "transactions" ? "bg-gray-800 text-white border-gray-800" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+            Transactions
+          </button>
+          <button onClick={() => setPageTab("rules")}
+            className={`text-sm px-4 py-2 rounded-lg border transition-colors ${pageTab === "rules" ? "bg-gray-800 text-white border-gray-800" : "border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+            Vendor Rules
+          </button>
+        </div>
       </div>
 
-      {showForm && (
+      {pageTab === "rules" && <VendorRulesTab />}
+
+      {pageTab === "transactions" && showForm && (
         <form onSubmit={handleCreate} className="bg-white border border-gray-100 rounded-xl p-6 shadow-sm grid grid-cols-2 gap-4">
           <div>
             <label className="text-xs text-gray-500 mb-1 block">Date</label>
@@ -176,12 +196,14 @@ export default function TransactionsPage() {
         </form>
       )}
 
-      <div className="flex flex-wrap gap-3 items-center">
+      {pageTab === "transactions" && <div className="flex flex-wrap gap-3 items-center">
         <select value={type} onChange={(e) => setType(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
           <option value="">All types</option>
           <option value="income">Income</option>
           <option value="expense">Expense</option>
+          <option value="transfer-in">Transfer In</option>
+          <option value="transfer-out">Transfer Out</option>
         </select>
         <select value={category} onChange={(e) => setCategory(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
@@ -211,9 +233,9 @@ export default function TransactionsPage() {
           onChange={(e) => setVendor(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white w-36"
         />
-      </div>
+      </div>}
 
-      {loading ? (
+      {pageTab === "transactions" && loading ? (
         <p className="text-gray-400">Loading…</p>
       ) : items.length === 0 ? (
         <p className="text-gray-400">No transactions yet. Import some from the Import page.</p>
@@ -235,6 +257,7 @@ export default function TransactionsPage() {
                 <th className="px-4 py-3 text-right cursor-pointer select-none hover:text-gray-700" onClick={() => handleSort("tax")}>
                   Tax{sortCol === "tax" ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                 </th>
+                <th className="px-4 py-3 text-center text-gray-500">Business</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -277,14 +300,21 @@ export default function TransactionsPage() {
                       {editing ? (
                         <select
                           value={editForm.type}
-                          onChange={(e) => setEditForm({ ...editForm, type: e.target.value as "income" | "expense" })}
+                          onChange={(e) => setEditForm({ ...editForm, type: e.target.value as "income" | "expense" | "transfer" })}
                           className="border border-blue-300 rounded px-2 py-1 text-sm"
                         >
                           <option value="income">income</option>
                           <option value="expense">expense</option>
+                          <option value="transfer-in">transfer-in</option>
+                          <option value="transfer-out">transfer-out</option>
                         </select>
                       ) : (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded ${
+                          t.type === "income" ? "bg-green-100 text-green-700"
+                          : t.type === "transfer-in" ? "bg-blue-50 text-blue-400"
+                          : t.type === "transfer-out" ? "bg-gray-100 text-gray-400"
+                          : "bg-red-100 text-red-700"
+                        }`}>
                           {t.type}
                         </span>
                       )}
@@ -327,7 +357,7 @@ export default function TransactionsPage() {
                       })()}
                     </td>
 
-                    <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
+                    <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : t.type?.startsWith("transfer") ? "text-gray-400" : "text-gray-800"}`}>
                       {editing ? (
                         <input
                           type="number"
@@ -354,6 +384,24 @@ export default function TransactionsPage() {
                         />
                       ) : (
                         t.tax ? fmt(t.tax) : "—"
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3 text-center">
+                      {(t.source === "bank_csv" || t.source === "manual") ? (
+                        <button
+                          onClick={() => api.updateTransaction(t.id, { business: !(t.business ?? false) }).then(() => load(page))}
+                          title={(t.business ?? false) ? "Click to mark as personal" : "Click to mark as business"}
+                          className={`text-xs font-medium px-2 py-0.5 rounded transition-colors ${
+                            (t.business ?? false)
+                              ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                              : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                          }`}
+                        >
+                          {(t.business ?? false) ? "Business" : "Personal"}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-gray-300 italic">Receipt</span>
                       )}
                     </td>
 

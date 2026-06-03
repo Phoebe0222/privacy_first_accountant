@@ -131,6 +131,7 @@ def run_auto_reconcile(db: Session, source_ref: str | None = None) -> dict:
 
     bank_q = db.query(Transaction).filter(
         Transaction.source == "bank_csv",
+        ~Transaction.type.in_(["transfer-in", "transfer-out"]),  # transfers reconcile with transfers, not receipts
         ~Transaction.id.in_(matched_bank_ids),
     )
     if source_ref:
@@ -176,7 +177,10 @@ def run_auto_reconcile(db: Session, source_ref: str | None = None) -> dict:
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 def get_summary(db: Session) -> dict:
-    total_bank = db.query(Transaction).filter(Transaction.source == "bank_csv").count()
+    total_bank = db.query(Transaction).filter(
+        Transaction.source == "bank_csv",
+        ~Transaction.type.in_(["transfer-in", "transfer-out"]),
+    ).count()
     total_receipts = db.query(Transaction).filter(
         Transaction.source.in_(["email", "pdf", "image"])
     ).count()
