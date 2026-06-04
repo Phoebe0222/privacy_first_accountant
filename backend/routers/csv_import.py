@@ -55,15 +55,50 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
             _jobs[job_id] = {"status": "failed", "error": "No valid transactions found in file."}
             return
 
-        # Normalise vendor names (deduplicated — each unique raw name resolved once)
-        from backend.services.vendor_normalizer import normalize_vendor
-        vendor_map: dict[str, str] = {}
-        for raw_vendor in {tx["vendor"] for tx in transactions if tx["vendor"] != "Unknown"}:
-            vendor_map[raw_vendor] = await normalize_vendor(raw_vendor)
+        # Normalise vendor names — use both vendor column and description column.
+        # Bank CSVs often have the real merchant in the description
+        # (e.g. "PAYPAL *AIAUMARKETS 4029357733 AUS" while vendor says "PayPal").
+        from backend.services.vendor_normalizer import normalize_vendor, _PROCESSOR_PREFIX_RE
+
+        # Vendor column values that are payment processors, not real merchants
+        _GENERIC_PROCESSORS = frozenset({"paypal", "stripe", "square", "eftpos", "afterpay", "payme", "unknown"})
+
+        to_normalise: set[str] = set()
         for tx in transactions:
-            raw = tx["vendor"]
-            tx["vendor"] = vendor_map.get(raw, raw)
-            if tx.get("description") == raw:
+            if tx.get("type") in ("transfer-in", "transfer-out"):
+                continue
+            if tx["vendor"] not in ("Unknown", ""):
+                to_normalise.add(tx["vendor"])
+            desc = tx.get("description", "")
+            if desc and desc != tx["vendor"]:
+                to_normalise.add(desc)
+
+        norm_cache: dict[str, str] = {}
+        for raw in to_normalise:
+            norm_cache[raw] = await normalize_vendor(raw)
+
+        for tx in transactions:
+            if tx.get("type") in ("transfer-in", "transfer-out"):
+                continue
+            raw_vendor = tx["vendor"]
+            raw_desc = tx.get("description", "")
+
+            vendor_norm = norm_cache.get(raw_vendor, raw_vendor)
+            desc_norm = norm_cache.get(raw_desc, raw_desc) if raw_desc and raw_desc != raw_vendor else None
+
+            # Prefer description-derived vendor when vendor column is a known processor or generic
+            use_desc = bool(
+                desc_norm
+                and desc_norm not in ("Unknown", "Internal Transfer")
+                and (
+                    raw_vendor in ("Unknown", "")
+                    or raw_vendor.lower().strip() in _GENERIC_PROCESSORS
+                    or bool(_PROCESSOR_PREFIX_RE.match(raw_vendor))
+                )
+            )
+
+            tx["vendor"] = desc_norm if use_desc else vendor_norm
+            if tx.get("description") == raw_vendor:
                 tx["description"] = tx["vendor"]
 
         db = SessionLocal()
@@ -116,10 +151,11 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                     data = {**tx, "needs_review": False, "category_confidence": 1.0}
                 else:
                     key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
-                    cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True})
+                    cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True, "business": False})
                     data = {**tx, "category": cat["category"],
                             "needs_review": cat["needs_review"],
-                            "category_confidence": cat["confidence"]}
+                            "category_confidence": cat["confidence"],
+                            "business": cat.get("business", False)}
                 t = _build_transaction(data, source=source, source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1

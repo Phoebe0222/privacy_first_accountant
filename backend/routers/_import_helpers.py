@@ -111,6 +111,7 @@ def _build_transaction(
         anomaly_reason=data.get("anomaly_reason"),
         needs_review=bool(data.get("needs_review", False)),
         category_confidence=data.get("category_confidence"),
+        business=bool(data.get("business", False)),
     )
 
 

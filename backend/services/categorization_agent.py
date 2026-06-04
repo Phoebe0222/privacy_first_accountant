@@ -51,6 +51,7 @@ class CategorizationState(BaseModel):
     needs_review: bool = True
     method: str = "fallback"
     history_summary: str = ""
+    business: bool = False
 
 
 # ── Structured output schema ──────────────────────────────────────────────────
@@ -59,6 +60,14 @@ class LLMCategorizationResult(BaseModel):
     category: str = Field(description="Transaction category from the allowed list")
     confidence: float = Field(description="Confidence score 0.0 to 1.0", ge=0.0, le=1.0)
     reasoning: str = Field(description="One sentence explaining the choice")
+    business: bool = Field(
+        description=(
+            "True if this is clearly a business expense/income "
+            "(professional tools, business software, office supplies, staff costs). "
+            "False if personal (personal groceries, personal entertainment, personal gym, personal shopping, personal travel, personal meals). "
+            "When unclear, default to False."
+        )
+    )
 
 
 # ── Agent 1: Deterministic rule matching ─────────────────────────────────────
@@ -99,16 +108,27 @@ async def _search_history(state: CategorizationState) -> CategorizationState:
 
     categories: list[str] = []
     vendor_lower = state.vendor.lower()
+    desc_lower = (state.description or "").lower()
     for doc in results:
-        doc_vendor, doc_category = "", ""
+        doc_vendor, doc_category, doc_desc = "", "", ""
         for line in doc.split("\n"):
             if line.startswith("Vendor:"):
                 doc_vendor = line.split(":", 1)[1].strip().lower()
             elif line.startswith("Category:"):
                 doc_category = line.split(":", 1)[1].strip().lower()
-        if (vendor_lower and doc_vendor
-                and vendor_lower not in doc_vendor
-                and doc_vendor not in vendor_lower):
+            elif line.startswith("Description:"):
+                doc_desc = line.split(":", 1)[1].strip().lower()
+
+        vendor_match = bool(
+            vendor_lower and doc_vendor
+            and (vendor_lower in doc_vendor or doc_vendor in vendor_lower)
+        )
+        desc_match = bool(
+            desc_lower and doc_desc
+            and len(desc_lower) > 5
+            and (desc_lower[:30] in doc_desc or doc_desc[:30] in desc_lower)
+        )
+        if not vendor_match and not desc_match:
             continue
         if doc_category and doc_category != "other":
             categories.append(doc_category)
@@ -136,7 +156,8 @@ async def _search_history(state: CategorizationState) -> CategorizationState:
 
 _PROMPT = ChatPromptTemplate.from_messages([
     ("system", (
-        "You are categorising financial transactions for an Australian small business. "
+        "You are categorising financial transactions from an Australian bank account that contains "
+        "a mix of personal and business purchases. "
         "Think step by step before choosing a category, then return only the JSON object."
     )),
     ("human", (
@@ -145,9 +166,13 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "Amount: ${amount}\n"
         "Type: {tx_type}\n"
         "{history_hint}\n"
-        "Step 1 — What kind of business or service is this vendor?\n"
-        "Step 2 — Which category below fits best?\n"
-        "Step 3 — How confident are you? (0.0 = no idea, 1.0 = certain)\n\n"
+        "Step 1 — Read the description carefully. If the vendor is generic (e.g. PayPal, bank), "
+        "use the description to identify the real merchant or purpose.\n"
+        "Step 2 — Which category fits best?\n"
+        "Step 3 — Is this business or personal? "
+        "business=true: professional tools, SaaS, office supplies, work travel, client meals, wages. "
+        "business=false: personal groceries, personal entertainment, gym, personal shopping. Default false.\n"
+        "Step 4 — How confident are you in the category? (0.0–1.0)\n\n"
         "Valid expense categories: food, grocery, cafe, transport, travel, utilities, "
         "software, marketing, fee, gym, medical, office, subscription, shopping, "
         "leisure, material, other\n"
@@ -184,6 +209,7 @@ async def _llm_categorize(state: CategorizationState) -> CategorizationState:
             "confidence": confidence,
             "needs_review": needs_review,
             "method": "llm",
+            "business": result.business,
         })
     except Exception as e:
         log.warning("LLM categorize failed for '%s': %s", state.vendor, e)
@@ -224,6 +250,7 @@ async def categorize_transaction(
       confidence    float — 0.0–1.0 (1.0 for rule/history hits)
       needs_review  bool  — True when confidence < CONFIDENCE_THRESHOLD
       method        str   — "rules" | "history" | "llm" | "fallback"
+      business      bool  — True if the LLM determined this is a business transaction
     """
     state = CategorizationState(
         vendor=(vendor or "").strip(),
@@ -238,4 +265,5 @@ async def categorize_transaction(
         "confidence": final.confidence,
         "needs_review": final.needs_review,
         "method": final.method,
+        "business": final.business,
     }

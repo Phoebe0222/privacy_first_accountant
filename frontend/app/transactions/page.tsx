@@ -107,7 +107,7 @@ export default function TransactionsPage() {
   }
 
   async function saveEdit(id: number) {
-    await api.updateTransaction(id, {
+    const updated = await api.updateTransaction(id, {
       vendor: editForm.vendor,
       category: editForm.category,
       amount: parseFloat(editForm.amount) || 0,
@@ -115,8 +115,8 @@ export default function TransactionsPage() {
       type: editForm.type,
       description: editForm.description,
     });
+    setItems((prev) => prev.map((t) => t.id === id ? updated : t));
     setEditingId(null);
-    load(page);
   }
 
   return (
@@ -390,7 +390,7 @@ export default function TransactionsPage() {
                     <td className="px-4 py-3 text-center">
                       {(t.source === "bank_csv" || t.source === "manual") ? (
                         <button
-                          onClick={() => api.updateTransaction(t.id, { business: !(t.business ?? false) }).then(() => load(page))}
+                          onClick={() => api.updateTransaction(t.id, { business: !(t.business ?? false) }).then((updated) => setItems((prev) => prev.map((x) => x.id === t.id ? updated : x)))}
                           title={(t.business ?? false) ? "Click to mark as personal" : "Click to mark as business"}
                           className={`text-xs font-medium px-2 py-0.5 rounded transition-colors ${
                             (t.business ?? false)

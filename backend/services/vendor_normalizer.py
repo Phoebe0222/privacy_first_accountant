@@ -42,7 +42,7 @@ class VendorState(BaseModel):
 # ── Pre-processing regexes ────────────────────────────────────────────────────
 
 _PROCESSOR_PREFIX_RE = re.compile(
-    r"^(?:paypal|stripe|sq|sp|payme|afterpay)\s*\*\s*",
+    r"^(?:paypal|stripe|sq|sp|payme|afterpay)\s*[\*\s]\s*",
     re.IGNORECASE,
 )
 _BANK_PREFIX_RE = re.compile(

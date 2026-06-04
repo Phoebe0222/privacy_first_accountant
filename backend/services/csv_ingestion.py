@@ -4,17 +4,21 @@ import re
 
 from backend.services.utils import normalise_date as _normalise_date, DATE_RE as _DATE_RE, NUM_RE as _NUMBER_RE
 
-_TRANSFER_CATEGORY_RE = re.compile(r"\binternal\s+transfer|\btransfer\s+out\b|\btransfer\s+in\b", re.IGNORECASE)
+_TRANSFER_CATEGORY_RE = re.compile(
+    r"\binternal\s+transfers?\b|\btransfer\s+out\b|\btransfer\s+in\b",
+    re.IGNORECASE,
+)
 
 # Descriptions that indicate a transfer between own accounts.
-# Rows are NOT skipped — they're imported with type="transfer" so they can be reconciled.
+# Rows are NOT skipped — they're imported with type="transfer-in/out" for reconciliation.
 _TRANSFER_RE = re.compile(
     r"\bfunds?\s+tfer\b|\bfunds?\s+transfer\b"
-    r"|\binternal\s+transfer\b|\bown\s+transfer\b"
+    r"|\bfunds?\s+tfer\s+transfer\b"       # ANZ "FUNDS TFER TRANSFER"
+    r"|\binternal\s+transfers?\b|\bown\s+transfer\b"
     r"|\bm-?banking\s+(funds?\s+)?(tfer|transfer)\b"
-    r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)\b"
+    r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)s?\b"
     r"|\bbpay\b.{0,40}\bcredit\s+card\b"
-    r"|\bbpay\s+payment\b"
+    r"|\bbpay\s+payments?\b"
     r"|\bcredit\s+card\s+(payment|repayment)\b"
     r"|\bcc\s+payment\b|\bcard\s+repayment\b"
     r"|\bvisa\s+(payment|repayment|direct\s+debit)\b"
@@ -174,14 +178,19 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
         description = get("description") or vendor
 
         category_raw = get("category") or ""
-        if _TRANSFER_CATEGORY_RE.search(category_raw):
-            continue
+        is_transfer = False
 
-        # Detect inter-account transfers — keep them but reclassify the direction:
-        #   income  → transfer-in  (e.g. payment received from own savings)
-        #   expense → transfer-out (e.g. BPAY credit card repayment, funds transfer)
+        # Category column explicitly says "Internal Transfer / Transfer In / Transfer Out"
+        if _TRANSFER_CATEGORY_RE.search(category_raw):
+            is_transfer = True
+
+        # Description or vendor matches known transfer patterns
         if _TRANSFER_RE.search(vendor) or _TRANSFER_RE.search(description):
+            is_transfer = True
+
+        if is_transfer:
             tx_type = "transfer-in" if tx_type == "income" else "transfer-out"
+            vendor = "Internal Transfer"
 
         transactions.append({
             "date": _normalise_date(date),
@@ -190,7 +199,7 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
             "tax": round(abs(_clean_amount(get("tax"))), 2),
             "type": tx_type,
             "category": get("category") or "other",
-            "description": description[:500],
+            "description": description,
             "invoice_number": get("invoice_number") or None,
         })
     return transactions

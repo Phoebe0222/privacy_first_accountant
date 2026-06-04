@@ -73,6 +73,7 @@ class ExtractionState(BaseModel):
     category: str = "other"
     category_confidence: float = 0.0
     needs_review: bool = True
+    business: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -334,6 +335,7 @@ async def _categorize_step(state: ExtractionState) -> ExtractionState:
         "category": cat["category"],
         "category_confidence": cat["confidence"],
         "needs_review": cat["needs_review"],
+        "business": cat["business"],
     })
 
 
@@ -372,6 +374,7 @@ async def extract_from_text(text: str) -> dict:
         "category": final.category,
         "category_confidence": final.category_confidence,
         "needs_review": final.needs_review,
+        "business": final.business,
     }
 
 
