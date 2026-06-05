@@ -27,6 +27,7 @@ export interface Transaction {
   needs_review?: boolean;
   category_confidence?: number;
   business?: boolean;
+  source_ref?: string;
   created_at: string;
 }
 
@@ -48,7 +49,7 @@ export interface Summary {
 export const api = {
   getSummary: () => req<Summary>("/transactions/summary"),
 
-  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
+  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; source_ref?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
     const defined = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );

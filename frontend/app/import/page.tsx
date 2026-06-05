@@ -37,6 +37,19 @@ function removeCsvJob() {
   localStorage.removeItem(CSV_JOB_KEY);
 }
 
+const BANK_CSV_JOB_KEY = "pa_bank_csv_job";
+
+function getSavedBankCsvJob(): SavedCsvJob | null {
+  try { return JSON.parse(localStorage.getItem(BANK_CSV_JOB_KEY) || "null"); }
+  catch { return null; }
+}
+function persistBankCsvJob(jobId: string, filename: string) {
+  localStorage.setItem(BANK_CSV_JOB_KEY, JSON.stringify({ jobId, filename }));
+}
+function removeBankCsvJob() {
+  localStorage.removeItem(BANK_CSV_JOB_KEY);
+}
+
 const FILE_JOB_KEY = "pa_file_job";
 
 function getSavedFileJob(): string | null {
@@ -107,6 +120,21 @@ export default function ImportPage() {
     }
   }
 
+  async function resumeBankCsvJob(jobId: string, filename: string) {
+    setBankCsvUploading(true);
+    setLastBankCsvFile(filename);
+    try {
+      const r = await api.pollJob(jobId);
+      setBankCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
+      loadImportHistory();
+    } catch (e: unknown) {
+      setBankCsvResult(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBankCsvUploading(false);
+      removeBankCsvJob();
+    }
+  }
+
   async function resumeFileJob(jobId: string) {
     setUploading(true);
     try {
@@ -131,6 +159,8 @@ export default function ImportPage() {
     }
     const csvJob = getSavedCsvJob();
     if (csvJob) resumeCsvJob(csvJob.jobId, csvJob.filename);
+    const bankCsvJob = getSavedBankCsvJob();
+    if (bankCsvJob) resumeBankCsvJob(bankCsvJob.jobId, bankCsvJob.filename);
     const fileJobId = getSavedFileJob();
     if (fileJobId) resumeFileJob(fileJobId);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -204,6 +234,7 @@ export default function ImportPage() {
       setBankCsvUploading(false);
       return;
     }
+    persistBankCsvJob(jobId, file.name);
     try {
       const r = await api.pollJob(jobId);
       setBankCsvResult(`Done: ${r.added} transactions imported, ${r.skipped} rows skipped.`);
@@ -212,6 +243,7 @@ export default function ImportPage() {
       setBankCsvResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setBankCsvUploading(false);
+      removeBankCsvJob();
     }
   }
 

@@ -17,7 +17,7 @@ _TRANSFER_RE = re.compile(
     r"|\binternal\s+transfers?\b|\bown\s+transfer\b"
     r"|\bm-?banking\s+(funds?\s+)?(tfer|transfer)\b"
     r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)s?\b"
-    r"|\bbpay\b.{0,40}\bcredit\s+card\b"
+    r"|\bbpay\b.{0,40}\bcredit[\s-]?cards?"
     r"|\bbpay\s+payments?\b"
     r"|\bcredit\s+card\s+(payment|repayment)\b"
     r"|\bcc\s+payment\b|\bcard\s+repayment\b"
@@ -118,6 +118,17 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
     credit_col = mapping.get("credit_col")
     debit_col = mapping.get("debit_col")
     amount_col = mapping.get("amount")
+
+    # Guard: if no amount column was mapped at all, log clearly rather than silently returning []
+    if not amount_col and not (credit_col and debit_col):
+        import logging
+        logging.getLogger(__name__).warning(
+            "apply_mapping: no amount column detected. Mapping was: %s. "
+            "Headers in file: %s",
+            mapping,
+            list(rows[0].keys()) if rows else [],
+        )
+        return []
     # If debit/credit cols are mapped but contain no non-zero values, fall back to amount col
     if credit_col and debit_col:
         has_values = any(

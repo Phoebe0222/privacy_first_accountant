@@ -26,6 +26,7 @@ def list_transactions(
     vendor: Optional[str] = None,
     needs_review: Optional[bool] = None,
     anomaly: Optional[bool] = None,
+    source_ref: Optional[str] = None,
     sort_by: str = "date",
     sort_dir: str = "desc",
     limit: int = 200,
@@ -51,6 +52,8 @@ def list_transactions(
         q = q.filter(Transaction.needs_review == needs_review)
     if anomaly is not None:
         q = q.filter(Transaction.anomaly == anomaly)
+    if source_ref:
+        q = q.filter(Transaction.source_ref == source_ref)
     total = q.count()
     col = getattr(Transaction, sort_by if sort_by in SORTABLE_COLUMNS else "date")
     order = desc(col) if sort_dir == "desc" else asc(col)
@@ -282,5 +285,6 @@ def _serialize(t: Transaction) -> dict:
         "needs_review": t.needs_review or False,
         "category_confidence": t.category_confidence,
         "business": t.business if t.business is not None else False,
+        "source_ref": t.source_ref,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }

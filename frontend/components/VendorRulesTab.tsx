@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 const CATEGORIES = [
-  "food", "grocery", "cafe", "transport", "travel", "utilities", "software",
+  "food", "grocery", "drink", "transport", "travel", "utilities", "software",
   "marketing", "revenue", "salary", "refund", "office", "subscription",
   "shopping", "leisure", "material", "fee", "gym", "medical", "home_office", "other",
 ];

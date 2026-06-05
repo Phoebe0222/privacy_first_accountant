@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { api, Transaction, ReconciliationMatch } from "@/lib/api";
 import VendorRulesTab from "@/components/VendorRulesTab";
 
-const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
+const CATEGORIES = ["all", "food", "grocery", "drink", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 const FORM_CATEGORIES = CATEGORIES.filter((c) => c !== "all");
 const EMPTY_FORM = { date: "", vendor: "", amount: "", tax: "", category: "other", type: "expense" as "income" | "expense", description: "" };
 
@@ -34,6 +34,8 @@ export default function TransactionsPage() {
   const [total, setTotal] = useState(0);
   const [type, setType] = useState("");
   const [category, setCategory] = useState("all");
+  const [sourceRef, setSourceRef] = useState("");
+  const [importFiles, setImportFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortCol, setSortCol] = useState<keyof Transaction>("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -56,7 +58,7 @@ export default function TransactionsPage() {
     const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
     const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
     Promise.all([
-      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, vendor: vendor || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
+      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, source_ref: sourceRef || undefined, vendor: vendor || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
       api.getReconciliationMatches(),
     ]).then(([{ items, total }, matches]) => {
       setItems(items);
@@ -69,7 +71,12 @@ export default function TransactionsPage() {
 
   function resetAndLoad() { setPage(1); load(1); }
 
-  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor]);
+  useEffect(() => {
+    api.getImportHistory().then((h) =>
+      setImportFiles(h.filter((f) => f.source === "bank_csv").map((f) => f.source_ref))
+    ).catch(() => {});
+  }, []);
+  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor, sourceRef]);
   useEffect(() => { load(page); }, [page]);
   useEffect(() => { setPage(1); load(1, sortCol, sortDir); }, [sortCol, sortDir]);
 
@@ -233,6 +240,13 @@ export default function TransactionsPage() {
           onChange={(e) => setVendor(e.target.value)}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white w-36"
         />
+        {importFiles.length > 0 && (
+          <select value={sourceRef} onChange={(e) => setSourceRef(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white max-w-[180px]">
+            <option value="">All files</option>
+            {importFiles.map((f) => <option key={f} value={f}>{f}</option>)}
+          </select>
+        )}
       </div>}
 
       {pageTab === "transactions" && loading ? (
@@ -278,7 +292,10 @@ export default function TransactionsPage() {
                           autoFocus
                         />
                       ) : (
-                        <span className="font-medium text-gray-800">{t.vendor}</span>
+                        <div>
+                          <span className="font-medium text-gray-800">{t.vendor}</span>
+                          {t.source_ref && <p className="text-xs text-gray-400 mt-0.5">{t.source_ref}</p>}
+                        </div>
                       )}
                     </td>
 

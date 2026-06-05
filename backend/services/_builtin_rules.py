@@ -7,7 +7,7 @@ BUILT_IN_RULES: list[tuple[str, str]] = sorted([
     ("deliveroo", "food"),
     ("mcdonald", "food"),
 
-    ("starbucks", "cafe"),
+    ("starbucks", "drink"),
 
     ("woolworths", "grocery"),
     ("coles", "grocery"),

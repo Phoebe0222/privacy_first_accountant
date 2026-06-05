@@ -31,6 +31,7 @@ log = logging.getLogger(__name__)
 
 OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
 EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "llama3.2:3b")
+CSV_MAP_MODEL = os.getenv("CSV_MAP_MODEL", "llama3.2:3b")
 
 
 # ── Pipeline state ────────────────────────────────────────────────────────────
@@ -49,13 +50,25 @@ class CSVMappingState(BaseModel):
 # ── Structured output schemas ─────────────────────────────────────────────────
 
 class CSVCoreMappingResult(BaseModel):
-    date: str = Field(description="Column name for the transaction date")
+    date: str = Field(
+        description=(
+            "The EXACT column name from the headers list containing transaction dates. "
+            "For headerless CSVs use the generated name exactly (e.g. 'col_0'), "
+            "never a generic word like 'Date'."
+        )
+    )
     vendor: str = Field(
         description="Column with merchant/payee names — must be non-empty in sample rows"
     )
     amount: Optional[str] = Field(
         default=None,
-        description="Net/total amount column. null if using separate debit/credit columns. Prefer 'Net' or 'Total' over gross 'Amount'.",
+        description=(
+            "The individual transaction amount column. "
+            "Set this to null ONLY when there are explicit separate debit and credit columns — "
+            "in that case set debit_col and credit_col instead. "
+            "For all other formats (signed single amount column) this must NOT be null. "
+            "NEVER set this to a Balance or Running Balance column."
+        ),
     )
     debit_col: Optional[str] = Field(
         default=None, description="Withdrawal/debit amount column if separate, else null"
@@ -112,7 +125,11 @@ class CSVRowClassificationResult(BaseModel):
     )
     category: Optional[str] = Field(
         default=None,
-        description="Column with human-readable spend categories (e.g. 'Groceries'). null if none.",
+        description=(
+            "Column with SHORT human-readable spend categories (1–3 words, e.g. 'Groceries', 'Transport', 'Dining'). "
+            "null if none. NEVER use a column whose values are long bank descriptions like "
+            "'VISA DEBIT PURCHASE CARD 5001 NETFLIX.COM' — those are narrative/description columns, not categories."
+        ),
     )
     invoice_number: Optional[str] = Field(
         default=None,
@@ -129,13 +146,29 @@ _CORE_PROMPT = ChatPromptTemplate.from_messages([
     ("system", """\
 Map a financial CSV export to standard fields. Return the exact column names as they appear.
 
-Rules:
-- vendor must be the column containing merchant/payee names (non-empty text, not numbers or dates)
-- amount: the net/total amount column; prefer "Net" or "Total" over a gross "Amount" column
-- If there are SEPARATE debit and credit columns, set amount=null and use debit_col and credit_col
-- description: narrative or memo column; set to the same column as vendor if there is only one text column
-- All values must be exact column names from the headers list
+Vendor rules (priority order):
+  1. "Merchant Name", "Merchant" — bank-assigned clean name, always prefer
+  2. "Transaction Details", "Narrative", "Description", "Details", "Memo" — raw bank description
+  3. NEVER use these — they are payment metadata, not merchant names:
+     "Transaction Type", "Type", "Account Number", "Account", "Bank Account",
+     "Card", "Serial", "Reference", "Balance", "Status", "Method", "Category"
 
+Amount rules (IMPORTANT):
+  - NEVER set amount to balance, account number, or identifier columns
+  - If there are TWO separate debit and credit columns: set amount=null and use debit_col + credit_col
+  - For a single signed amount column: set amount to that column (must NOT be null)
+  - For headerless CSVs (col_0, col_1, …): col_1 is almost always the transaction amount
+
+
+Description rules:
+  - If vendor is "Merchant Name", set description to the narrative column ("Narrative", "Transaction Details")
+  - If there is only one text column, set description = vendor
+
+Date rules:
+  - Prefer "Date" over "Processed On", "Settlement Date", "Value Date"
+  - For headerless CSVs (col_0, col_1, …): identify the date column by its date-formatted values
+
+All values must be exact column names from the headers list.
 Return ONLY the JSON object."""),
     ("human", "Headers: {headers}\n\nSample rows:\n{sample}"),
 ])
@@ -152,7 +185,7 @@ async def _core_agent(state: CSVMappingState) -> CSVMappingState:
     headers_str = ", ".join(f'"{h}"' for h in state.headers)
     sample_str = _format_sample(state.sample_rows)
     try:
-        chain = _CORE_PROMPT | get_llm().with_structured_output(CSVCoreMappingResult)
+        chain = _CORE_PROMPT | get_llm(model=CSV_MAP_MODEL).with_structured_output(CSVCoreMappingResult)
         result: CSVCoreMappingResult = await chain.ainvoke({
             "headers": headers_str,
             "sample": sample_str,
@@ -172,17 +205,26 @@ _CLASSIFICATION_PROMPT = ChatPromptTemplate.from_messages([
 Analyse how a financial CSV classifies each row as income or expense, and identify filter columns.
 
 sign_based=true  → amount sign determines direction (positive=income, negative=expense)
-                   Use for most bank exports
-sign_based=false → a column contains explicit labels like "Sale", "Fee", "Refund"
-                   Use for PayPal, Stripe, Etsy, marketplace exports
+                   Use for: ANZ, CommBank, NAB single-amount exports; and Westpac (which uses
+                   separate Debit/Credit columns — both are positive; direction comes from which
+                   column has a value)
+sign_based=false → a named column contains explicit labels like "Sale", "Fee", "Refund"
+                   Use for: PayPal, Stripe, Etsy, marketplace exports
 
 If sign_based=true: set type_col=null and income_types/expense_types/exclude_types=[]
 
-status_col: ONLY set if a column explicitly tracks settlement state (values like "Completed", "Pending", "Cleared")
-            Do NOT set status_col to columns named "Type", "Transaction Type", "Method", or "Mode"
+Westpac note: "Serial" is a transaction serial number — use as invoice_number.
+              "Bank Account" is an account identifier — not vendor, not status.
 
-invoice_number: ONLY a per-transaction reference (Order #, Invoice #, Confirmation #)
-                Do NOT use account numbers, card numbers, or customer IDs
+category: if the CSV has a "Category" or "Spend Category" column with human-readable values
+          (e.g. "Dining", "Shopping", "Transport") set this. Bank-assigned categories are useful.
+          Do NOT set category to columns named "Transaction Type" or "Type".
+
+status_col: ONLY set if a column explicitly tracks settlement state (values like "Completed", "Pending", "Cleared")
+            Do NOT set status_col to columns named "Type", "Transaction Type", "Method", "Mode", or "Category"
+
+invoice_number: ONLY a per-transaction reference (Order #, Invoice #, Confirmation #, Transaction ID)
+                Do NOT use account numbers, card numbers, customer IDs, or "Account Number"
 
 Return ONLY the JSON object."""),
     ("human", "Headers: {headers}\n\nSample rows:\n{sample}"),
@@ -193,7 +235,7 @@ async def _classification_agent(state: CSVMappingState) -> CSVMappingState:
     headers_str = ", ".join(f'"{h}"' for h in state.headers)
     sample_str = _format_sample(state.sample_rows)
     try:
-        chain = _CLASSIFICATION_PROMPT | get_llm().with_structured_output(CSVRowClassificationResult)
+        chain = _CLASSIFICATION_PROMPT | get_llm(model=CSV_MAP_MODEL).with_structured_output(CSVRowClassificationResult)
         result: CSVRowClassificationResult = await chain.ainvoke({
             "headers": headers_str,
             "sample": sample_str,
@@ -215,7 +257,83 @@ _pipeline = RunnableLambda(_core_agent) | RunnableLambda(_classification_agent)
 
 _STATUS_COL_BLOCK = re.compile(r"\btype\b|\bmethod\b|\bmode\b", re.IGNORECASE)
 _INVOICE_COL_BLOCK = re.compile(r"\baccount\b|\bcard\b|\bcustomer\b|\bclient\b|\buser\b", re.IGNORECASE)
+_VENDOR_COL_BLOCK = re.compile(
+    r"\btransaction\s+type\b|\btype\b|\bmethod\b|\bstatus\b|\bbalance\b|\bcategory\b"
+    r"|\baccount\s+number\b|\bbank\s+account\b|\bserial\b",
+    re.IGNORECASE,
+)
 from backend.services.utils import NUM_RE as _NUM_RE, DATE_RE as _DATE_RE
+
+# ── Pattern-based column detection (authoritative for well-known names) ────────
+
+_AMOUNT_NAMES    = re.compile(r"^amount$|^net$|^total$", re.IGNORECASE)
+_DEBIT_NAMES     = re.compile(r"\bdebit\b", re.IGNORECASE)
+_CREDIT_NAMES    = re.compile(r"\bcredit\b", re.IGNORECASE)
+_BALANCE_NAMES   = re.compile(r"\bbalance\b|\brunning\b", re.IGNORECASE)
+_DATE_NAMES      = re.compile(r"^date$|^transaction\s*date$|^trans\s*date$", re.IGNORECASE)
+_VENDOR_PRIORITY = [
+    re.compile(r"^merchant\s*name$|^merchant$", re.IGNORECASE),
+    re.compile(r"^narrative$|^transaction\s+details$|^description$|^details$|^memo$", re.IGNORECASE),
+]
+
+
+def _detect_from_patterns(headers: list[str], rows: list[dict]) -> dict:
+    """
+    Detect key columns from header names and data patterns.
+    Returns a partial mapping — only fields we're confident about.
+    """
+    result: dict = {}
+
+    # ── Date: named first, then data scan ────────────────────────────────────
+    for h in headers:
+        if _DATE_NAMES.match(h):
+            result["date"] = h
+            break
+    if "date" not in result:
+        for h in headers:
+            vals = [row.get(h, "").strip() for row in rows[:5] if row.get(h, "").strip()]
+            if vals and _DATE_RE.match(vals[0]):
+                result["date"] = h
+                break
+
+    # ── Amount / debit+credit ─────────────────────────────────────────────────
+    debit_h  = next((h for h in headers if _DEBIT_NAMES.search(h)), None)
+    credit_h = next((h for h in headers if _CREDIT_NAMES.search(h)), None)
+    if debit_h and credit_h:
+        result["debit_col"] = debit_h
+        result["credit_col"] = credit_h
+    else:
+        # Named "Amount" / "Net" / "Total"
+        amount_h = next((h for h in headers if _AMOUNT_NAMES.match(h)), None)
+        if amount_h:
+            result["amount"] = amount_h
+        else:
+            # Headerless: first numeric column after the date column
+            date_h = result.get("date")
+            seen_date = False
+            for h in headers:
+                if h == date_h:
+                    seen_date = True
+                    continue
+                if not seen_date:
+                    continue
+                if _BALANCE_NAMES.search(h):
+                    continue
+                vals = [row.get(h, "").strip() for row in rows[:10] if row.get(h, "").strip()]
+                monetary = [v for v in vals if _NUM_RE.match(re.sub(r'[,$+]', '', v.lstrip('-')))]
+                if len(monetary) >= max(1, len(vals) // 2):
+                    result["amount"] = h
+                    break
+
+    # ── Vendor: priority list of known column names ───────────────────────────
+    for pattern in _VENDOR_PRIORITY:
+        h = next((h for h in headers if pattern.match(h)), None)
+        if h:
+            result["vendor"] = h
+            result["description"] = h
+            break
+
+    return result
 
 
 def _resolve(name: Optional[str], header_map: dict[str, str]) -> Optional[str]:
@@ -232,6 +350,21 @@ def _filter_list(values: list[str], all_data_values: set[str]) -> list[str]:
     return [v for v in values if isinstance(v, str) and v.strip().lower() in all_data_values]
 
 
+def _validate_category_col(col: Optional[str], rows: list[dict]) -> Optional[str]:
+    """Reject a category column whose values look like raw bank descriptions rather than
+    short human-readable categories (e.g. 'Groceries', 'Transport').
+    A value with more than 4 words is almost certainly a description, not a category."""
+    if not col:
+        return None
+    sample_vals = [row.get(col, "").strip() for row in rows[:10] if row.get(col, "").strip()]
+    if not sample_vals:
+        return col
+    avg_words = sum(len(v.split()) for v in sample_vals) / len(sample_vals)
+    if avg_words > 4:
+        return None
+    return col
+
+
 def _build_mapping(state: CSVMappingState) -> dict:
     core = state.core
     cls = state.classification
@@ -242,13 +375,39 @@ def _build_mapping(state: CSVMappingState) -> dict:
     if not core:
         return {}
 
-    # Resolve column names case-insensitively
-    date = _resolve(core.date, hm)
-    vendor = _resolve(core.vendor, hm)
-    amount = _resolve(core.amount, hm)
-    debit_col = _resolve(core.debit_col, hm)
-    credit_col = _resolve(core.credit_col, hm)
-    description = _resolve(core.description, hm)
+    # Run pattern-based detection — authoritative for well-known column names.
+    # These override the LLM where we're confident (named "Amount", "Debit Amount", etc.)
+    patterns = _detect_from_patterns(state.headers, rows)
+    log.debug("Pattern detection: %s", patterns)
+
+    # Resolve LLM output, then fill gaps / overrides from patterns
+    date      = _resolve(core.date, hm)      or patterns.get("date")
+    vendor    = _resolve(core.vendor, hm)    or patterns.get("vendor")
+    amount    = patterns.get("amount")       or _resolve(core.amount, hm)
+    debit_col = patterns.get("debit_col")    or _resolve(core.debit_col, hm)
+    credit_col= patterns.get("credit_col")   or _resolve(core.credit_col, hm)
+    description = _resolve(core.description, hm) or patterns.get("description")
+
+    # If pattern detected debit+credit, clear single amount
+    if debit_col and credit_col:
+        amount = None
+
+    # ── General data-driven validation ──────────────────────────────────────────
+    # Rather than bank-specific guards, validate each field against actual sample values.
+
+    # Amount validation: if the LLM-mapped amount column contains non-monetary values
+    # (e.g. account numbers, text), clear it so the fallback can find the right column.
+    if amount:
+        sample_vals = [row.get(amount, "").strip() for row in rows[:10] if row.get(amount, "").strip()]
+        monetary = [v for v in sample_vals if _NUM_RE.match(re.sub(r'[,$]', '', v.lstrip('-').lstrip('+')))]
+        if len(monetary) < len(sample_vals) // 2:
+            log.warning("Amount column '%s' contains non-monetary values — clearing", amount)
+            amount = None
+
+    # Vendor guard: reject columns that are clearly metadata, not merchant names
+    if vendor and _VENDOR_COL_BLOCK.search(vendor):
+        log.warning("Vendor column '%s' looks like metadata — clearing, fallback will find better", vendor)
+        vendor = None
 
     # Vendor fallback: if the resolved vendor column is empty in sample rows, find a better one
     def _has_values(col: Optional[str]) -> bool:
@@ -304,9 +463,12 @@ def _build_mapping(state: CSVMappingState) -> dict:
             status_col = None
             completed_status = None
 
-    # Invoice number: block account/card/customer columns
+    # Invoice number: block account/card/customer columns and date columns
     invoice_number = _resolve(cls.invoice_number, hm)
     if invoice_number and _INVOICE_COL_BLOCK.search(invoice_number):
+        invoice_number = None
+    # Never use the date column as invoice_number (LLM confusion with headerless CSVs)
+    if invoice_number and invoice_number == date:
         invoice_number = None
 
     return {
@@ -323,7 +485,7 @@ def _build_mapping(state: CSVMappingState) -> dict:
         "status_col": status_col,
         "completed_status": completed_status,
         "tax": _resolve(cls.tax, hm),
-        "category": _resolve(cls.category, hm),
+        "category": _validate_category_col(_resolve(cls.category, hm), rows),
         "invoice_number": invoice_number,
     }
 
@@ -349,6 +511,21 @@ async def map_csv_columns(headers: list[str], sample_rows: list[dict]) -> dict:
         all_data_values=all_data_values,
     )
     final: CSVMappingState = await _pipeline.ainvoke(state)
+
+    # Log raw LLM output before any guards/fallbacks
+    if final.core:
+        c = final.core
+        log.info(
+            "CSV LLM RAW (core) | date=%s vendor=%s amount=%s debit=%s credit=%s description=%s",
+            c.date, c.vendor, c.amount, c.debit_col, c.credit_col, c.description,
+        )
+    if final.classification:
+        cls = final.classification
+        log.info(
+            "CSV LLM RAW (classification) | sign_based=%s type_col=%s category=%s invoice=%s",
+            cls.sign_based, cls.type_col, cls.category, cls.invoice_number,
+        )
+
     mapping = _build_mapping(final)
-    log.info("CSV MAPPING | %s", mapping)
+    log.info("CSV MAPPING (after guards) | %s", mapping)
     return mapping

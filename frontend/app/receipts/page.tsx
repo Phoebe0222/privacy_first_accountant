@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { api, Transaction, ReconciliationMatch } from "@/lib/api";
 import VendorRulesTab from "@/components/VendorRulesTab";
 
-const CATEGORIES = ["all", "food", "grocery", "cafe", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
+const CATEGORIES = ["all", "food", "grocery", "drink", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 
 function fyStartYear(): number {
   const now = new Date();
@@ -40,19 +40,26 @@ export default function ReceiptsPage() {
   const [customTo, setCustomTo] = useState("");
   const [vendor, setVendor] = useState("");
   const [receiptSource, setReceiptSource] = useState("");
+  const [sortCol, setSortCol] = useState<keyof Transaction>("date");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [matchMap, setMatchMap] = useState<Record<number, ReconciliationMatch>>({});
   const [sourceId, setSourceId] = useState<number | null>(null);
   const [sourceText, setSourceText] = useState<string>("");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
 
-  function load(p = page) {
+  function handleSort(col: keyof Transaction) {
+    if (col === sortCol) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortCol(col); setSortDir("asc"); }
+  }
+
+  function load(p = page, col = sortCol, dir = sortDir) {
     setLoading(true);
     const fy = FY_OPTIONS.find((o) => o.value === dateRange);
     const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
     const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
     Promise.all([
-      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, vendor: vendor || undefined, source: receiptSource || undefined, sort_by: "date", sort_dir: "desc", limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
+      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, vendor: vendor || undefined, source: receiptSource || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
       api.getReconciliationMatches(),
     ]).then(([{ items, total }, matches]) => {
       const receipts = receiptSource ? items : items.filter((t) => t.source !== "bank_csv");
@@ -66,6 +73,7 @@ export default function ReceiptsPage() {
 
   useEffect(() => { setPage(1); load(1); }, [type, category, dateRange, customFrom, customTo, vendor, receiptSource]);
   useEffect(() => { load(page); }, [page]);
+  useEffect(() => { setPage(1); load(1, sortCol, sortDir); }, [sortCol, sortDir]);
 
   async function toggleSource(id: number) {
     if (sourceId === id) { setSourceId(null); return; }
@@ -143,13 +151,15 @@ export default function ReceiptsPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
               <tr>
-                <th className="px-4 py-3 text-left">Date</th>
-                <th className="px-4 py-3 text-left">Vendor</th>
-                <th className="px-4 py-3 text-left">Category</th>
+                {(["date", "vendor", "category", "amount"] as (keyof Transaction)[]).map((col) => (
+                  <th key={col} onClick={() => handleSort(col)}
+                    className="px-4 py-3 text-left cursor-pointer select-none hover:text-gray-700">
+                    {col}{sortCol === col ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                  </th>
+                ))}
                 <th className="px-4 py-3 text-left">Type</th>
                 <th className="px-4 py-3 text-left">Source</th>
                 <th className="px-4 py-3 text-left">Matched to</th>
-                <th className="px-4 py-3 text-right">Amount</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>

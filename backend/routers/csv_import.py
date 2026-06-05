@@ -144,8 +144,27 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                 log.info("CSV CAT | %s → %s (%.0f%%) method=%s",
                          key, cat_result["category"], cat_result["confidence"] * 100, cat_result["method"])
 
+            # Build a dedup set from transactions already imported from THIS SAME FILE.
+            # Scoping to source_ref means:
+            #   - True same-file duplicates are still blocked
+            #   - Deleted transactions from this file come back when re-importing
+            #   - Cross-file overlap (different filenames, same date range) is not blocked
+            # Key: (date, amount) — excludes type so user edits don't bypass dedup.
+            existing_keys: set[tuple] = {
+                (t.date, round(t.amount, 2))
+                for t in db.query(Transaction.date, Transaction.amount)
+                    .filter(Transaction.source == source, Transaction.source_ref == filename)
+                    .all()
+            }
+
             added = 0
+            duplicates = 0
             for tx in transactions:
+                tx_key = (tx.get("date"), round(float(tx.get("amount") or 0), 2))
+                if tx_key in existing_keys:
+                    duplicates += 1
+                    continue
+
                 csv_category = tx.get("category") or ""
                 if csv_category and csv_category != "other":
                     data = {**tx, "needs_review": False, "category_confidence": 1.0}
@@ -159,14 +178,16 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                 t = _build_transaction(data, source=source, source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1
+                existing_keys.add(tx_key)  # also prevents intra-file duplicates
             db.commit()
+            log.info("CSV SAVE | added=%d  duplicates_skipped=%d", added, duplicates)
             transaction_ids = [
                 t.id for t in db.query(Transaction).filter(Transaction.source_ref == filename).all()
             ]
         finally:
             db.close()
 
-        _jobs[job_id] = {"status": "done", "added": added, "skipped": len(rows) - added}
+        _jobs[job_id] = {"status": "done", "added": added, "skipped": len(rows) - added - duplicates, "duplicates": duplicates}
         asyncio.create_task(_index_transactions(transaction_ids))
     except Exception as e:
         _jobs[job_id] = {"status": "failed", "error": str(e)}

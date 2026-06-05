@@ -35,7 +35,7 @@ def search_transactions(
     """
     Search transactions from the database. All filters are optional.
     tx_type must be 'income' or 'expense'.
-    category must be one of: food, grocery, cafe, transport, travel, utilities,
+    category must be one of: food, grocery, drink, transport, travel, utilities,
     software, marketing, fee, gym, medical, office, subscription, shopping,
     leisure, material, other, salary, revenue, refund.
     Returns matching transactions with their IDs, dates, vendors, amounts, categories, and types.
