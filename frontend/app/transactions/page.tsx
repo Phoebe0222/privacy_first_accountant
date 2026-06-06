@@ -46,6 +46,7 @@ export default function TransactionsPage() {
   const [customTo, setCustomTo] = useState("");
   const [source, setSource] = useState("bank_csv");
   const [vendor, setVendor] = useState("");
+  const [businessOnly, setBusinessOnly] = useState(false);
   const [matchMap, setMatchMap] = useState<Record<number, ReconciliationMatch>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense" | "transfer" | "transfer-in" | "transfer-out", description: "" });
@@ -58,7 +59,7 @@ export default function TransactionsPage() {
     const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
     const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
     Promise.all([
-      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, source_ref: sourceRef || undefined, vendor: vendor || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
+      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, source_ref: sourceRef || undefined, vendor: vendor || undefined, business: businessOnly || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
       api.getReconciliationMatches(),
     ]).then(([{ items, total }, matches]) => {
       setItems(items);
@@ -76,7 +77,7 @@ export default function TransactionsPage() {
       setImportFiles(h.filter((f) => f.source === "bank_csv").map((f) => f.source_ref))
     ).catch(() => {});
   }, []);
-  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor, sourceRef]);
+  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor, sourceRef, businessOnly]);
   useEffect(() => { load(page); }, [page]);
   useEffect(() => { setPage(1); load(1, sortCol, sortDir); }, [sortCol, sortDir]);
 
@@ -247,6 +248,15 @@ export default function TransactionsPage() {
             {importFiles.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
         )}
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={businessOnly}
+            onChange={(e) => setBusinessOnly(e.target.checked)}
+            className="rounded"
+          />
+          Business only
+        </label>
       </div>}
 
       {pageTab === "transactions" && loading ? (

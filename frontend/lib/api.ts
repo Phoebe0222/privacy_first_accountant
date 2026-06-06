@@ -41,15 +41,17 @@ export interface Summary {
   business_expenses: number;
   business_net: number;
   by_category_business: { category: string; total: number }[];
+  by_category_business_income: { category: string; total: number }[];
   personal_expenses: number;
   personal_income: number;
   by_category_personal: { category: string; total: number }[];
+  by_category_personal_income: { category: string; total: number }[];
 }
 
 export const api = {
   getSummary: () => req<Summary>("/transactions/summary"),
 
-  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; source_ref?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
+  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; source_ref?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; business?: boolean; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
     const defined = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );

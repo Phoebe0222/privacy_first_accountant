@@ -27,6 +27,7 @@ def list_transactions(
     needs_review: Optional[bool] = None,
     anomaly: Optional[bool] = None,
     source_ref: Optional[str] = None,
+    business: Optional[bool] = None,
     sort_by: str = "date",
     sort_dir: str = "desc",
     limit: int = 200,
@@ -54,6 +55,8 @@ def list_transactions(
         q = q.filter(Transaction.anomaly == anomaly)
     if source_ref:
         q = q.filter(Transaction.source_ref == source_ref)
+    if business is not None:
+        q = q.filter(Transaction.business == business)  # noqa: E712
     total = q.count()
     col = getattr(Transaction, sort_by if sort_by in SORTABLE_COLUMNS else "date")
     order = desc(col) if sort_dir == "desc" else asc(col)
@@ -261,10 +264,12 @@ def summary(db: Session = Depends(get_db)):
         "business_expenses": round(biz_expenses, 2),
         "business_net": round(biz_income - biz_expenses, 2),
         "by_category_business": _by_cat([biz, Transaction.type == "expense"]),
+        "by_category_business_income": _by_cat([biz, Transaction.type == "income"]),
         # Personal breakdown
         "personal_expenses": round(personal_expenses, 2),
         "personal_income": round(personal_income, 2),
         "by_category_personal": _by_cat([personal, Transaction.type == "expense"]),
+        "by_category_personal_income": _by_cat([personal, Transaction.type == "income"]),
     }
 
 

@@ -30,6 +30,38 @@ from backend.services.utils import get_llm
 log = logging.getLogger(__name__)
 
 
+# ── Transfer detection ────────────────────────────────────────────────────────
+
+_TRANSFER_CATEGORY_RE = re.compile(
+    r"\binternal\s+transfers?\b|\btransfer\s+out\b|\btransfer\s+in\b",
+    re.IGNORECASE,
+)
+_TRANSFER_RE = re.compile(
+    r"\bfunds?\s+tfer\b|\bfunds?\s+transfer\b"
+    r"|\bfunds?\s+tfer\s+transfer\b"
+    r"|\binternal\s+transfers?\b|\bown\s+transfer\b"
+    r"|\bm-?banking\s+(funds?\s+)?(tfer|transfer)\b"
+    r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)s?\b"
+    r"|\bbpay\b.{0,40}\bcredit[\s-]?car(?:d[s]?)?\b"
+    r"|\bbpay\s+payments?\b"
+    r"|\bcredit\s+card\s+(payment|repayment)\b"
+    r"|\bcc\s+payment\b|\bcard\s+repayment\b"
+    r"|\bvisa\s+(payment|repayment|direct\s+debit)\b"
+    r"|\bmastercard\s+(payment|repayment|direct\s+debit)\b"
+    r"|\bamex\s+(payment|repayment)\b"
+    r"|\bpayment\s+thank\s+you\b"
+    r"|\bpayment\s+received\s+-\s+thank\s+you\b",
+    re.IGNORECASE,
+)
+
+
+def is_transfer(vendor: str, description: str = "", category: str = "") -> bool:
+    """Return True if this transaction is a transfer between own accounts."""
+    if _TRANSFER_CATEGORY_RE.search(category):
+        return True
+    return bool(_TRANSFER_RE.search(vendor) or _TRANSFER_RE.search(description))
+
+
 # ── Pipeline state ────────────────────────────────────────────────────────────
 
 class VendorState(BaseModel):
@@ -163,21 +195,25 @@ _PROMPT = ChatPromptTemplate.from_messages([
      "   'VISA DEBIT PURCHASE CARD 5001 HUNGRYPANDA' → 'HungryPanda'\n"
      "   'EFTPOS PURCHASE CARD 2971 GONG CHA' → 'Gong Cha'\n"
      "   'MASTERCARD PURCHASE 1234 URBAN CLIMB' → 'Urban Climb'\n"
-     "2. Remove PayPal/Stripe/Square prefixes:\n"
+     "2. Remove mobile banking payment or internet payment prefixes - the real merchant follows:\n"
+     "   'ANZ INTERNET BANKING BPAY DEFT PAYMENTS' → 'DEFT PAYMENTS'\n"
+     "   'ANZ INTERNET BANKING BPAY SROVIC LAND TAX' → 'SROVIC LAND TAX'\n"
+     "   'ANZ MOBILE BANKING PAYMENT 123456 TO John Wick' → 'John Wick'\n"
+     "3. Remove PayPal/Stripe/Square prefixes:\n"
      "   'PAYPAL *AIAUMARKETS 0401100630 AUS' → 'AIAUMARKETS'\n"
      "   'STRIPE *EXAMPLE 1234567890 AUS' → 'EXAMPLE'\n"
      "   'SQUARE *EXAMPLE 1234567890 AUS' → 'EXAMPLE'\n"
-     "3. Remove street addresses, suburbs, cities, states, and country codes appended after the brand.\n"
+     "4. Remove street addresses, suburbs, cities, states, and country codes appended after the brand.\n"
      "   'GONG CHA SPENCER ST MELBOURNE' → 'Gong Cha'\n"
      "   'ALICE AND OLIVIA HK RE TSIM SHA TSUI' → 'Alice and Olivia'\n"
      "   'Chow Sang Sang Kowloon' → 'Chow Sang Sang'\n"
      "   EXCEPTION: keep geography when it IS the brand: 'Australia Post', 'Air New Zealand'.\n"
-     "3. Remove legal suffixes: Pty Ltd, Private Limited, Pte Ltd, Inc, LLC, Corp, Ltd.\n"
-     "4. Split compact domain-style names: 'laprairie' → 'La Prairie', "
+     "5. Remove legal suffixes: Pty Ltd, Private Limited, Pte Ltd, Inc, LLC, Corp, Ltd.\n"
+     "6. Split compact domain-style names: 'laprairie' → 'La Prairie', "
      "'world.taobao' → 'Taobao', 'pc.meitu' → 'Meitu'.\n"
-     "5. Remove 'HK RE ...' address sequences.\n"
-     "6. Remove platform descriptors: E-commerce, Holdings, Group, International.\n"
-     "7. Title-case all-uppercase names.\n"
+     "7. Remove 'HK RE ...' address sequences.\n"
+     "8. Remove platform descriptors: E-commerce, Holdings, Group, International.\n"
+     "9. Title-case all-uppercase names.\n"
      "Return ONLY the JSON object."),
     ("human", "Vendor: {vendor}"),
 ])

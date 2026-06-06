@@ -31,7 +31,7 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
     entrypoint: ["/bin/sh", "-c"]
-    command: ["ollama pull llama3.2:3b && ollama pull qwen2.5:14b && ollama pull nomic-embed-text"]
+    command: ["ollama pull llama3.2:3b && ollama pull qwen2.5:7b && ollama pull nomic-embed-text"]
     restart: "no"
 
   backend:
@@ -46,7 +46,7 @@ services:
       - OLLAMA_BASE=http://ollama:11434
       - DATABASE_URL=sqlite:////app/data/accountant.db
       - CHROMA_PATH=/app/data/chroma_db
-      - CHAT_MODEL=qwen2.5:14b
+      - CHAT_MODEL=qwen2.5:7b
       - CSV_MAP_MODEL=llama3.2:3b
     depends_on:
       ollama:

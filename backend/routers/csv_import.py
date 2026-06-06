@@ -157,6 +157,18 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                     .all()
             }
 
+            # Build a vendor → business flag map from ALL existing transactions.
+            # This preserves user-set business flags across delete+reimport cycles:
+            # if the user marked "Bupa Australia" as business, new imports of the same
+            # vendor inherit that flag even after clearing the file.
+            vendor_business: dict[str, bool] = {
+                t.vendor: t.business
+                for t in db.query(Transaction.vendor, Transaction.business)
+                    .filter(Transaction.business == True)  # noqa: E712
+                    .all()
+                if t.vendor
+            }
+
             added = 0
             duplicates = 0
             for tx in transactions:
@@ -175,6 +187,11 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                             "needs_review": cat["needs_review"],
                             "category_confidence": cat["confidence"],
                             "business": cat.get("business", False)}
+
+                # Inherit user-set business flag from any prior transaction with this vendor
+                if tx.get("vendor") in vendor_business:
+                    data = {**data, "business": True}
+
                 t = _build_transaction(data, source=source, source_ref=filename, raw_text="")
                 db.add(t)
                 added += 1

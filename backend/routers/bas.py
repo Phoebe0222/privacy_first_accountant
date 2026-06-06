@@ -62,7 +62,13 @@ def get_bas(year: int, quarter: str = "annual", db: Session = Depends(get_db)):
         )
     )
 
-    income_txs = base_q.filter(Transaction.type == "income").all()
+    # G1 is taxable supplies only — revenue transactions with recorded GST.
+    # Dividends, rent, salary, refunds have no GST so tax = 0 and are excluded.
+    income_txs = base_q.filter(
+        Transaction.type == "income",
+        Transaction.category == "revenue",
+        Transaction.tax > 0,
+    ).all()
     expense_txs = base_q.filter(Transaction.type == "expense").all()
 
     G1 = sum(t.amount or 0 for t in income_txs)

@@ -3,31 +3,7 @@ import io
 import re
 
 from backend.services.utils import normalise_date as _normalise_date, DATE_RE as _DATE_RE, NUM_RE as _NUMBER_RE
-
-_TRANSFER_CATEGORY_RE = re.compile(
-    r"\binternal\s+transfers?\b|\btransfer\s+out\b|\btransfer\s+in\b",
-    re.IGNORECASE,
-)
-
-# Descriptions that indicate a transfer between own accounts.
-# Rows are NOT skipped — they're imported with type="transfer-in/out" for reconciliation.
-_TRANSFER_RE = re.compile(
-    r"\bfunds?\s+tfer\b|\bfunds?\s+transfer\b"
-    r"|\bfunds?\s+tfer\s+transfer\b"       # ANZ "FUNDS TFER TRANSFER"
-    r"|\binternal\s+transfers?\b|\bown\s+transfer\b"
-    r"|\bm-?banking\s+(funds?\s+)?(tfer|transfer)\b"
-    r"|\binternet\s+banking\s+(funds?\s+)?(tfer|transfer)s?\b"
-    r"|\bbpay\b.{0,40}\bcredit[\s-]?cards?"
-    r"|\bbpay\s+payments?\b"
-    r"|\bcredit\s+card\s+(payment|repayment)\b"
-    r"|\bcc\s+payment\b|\bcard\s+repayment\b"
-    r"|\bvisa\s+(payment|repayment|direct\s+debit)\b"
-    r"|\bmastercard\s+(payment|repayment|direct\s+debit)\b"
-    r"|\bamex\s+(payment|repayment)\b"
-    r"|\bpayment\s+thank\s+you\b"
-    r"|\bpayment\s+received\s+-\s+thank\s+you\b",
-    re.IGNORECASE,
-)
+from backend.services.vendor_normalizer import is_transfer as _is_transfer
 
 
 def _looks_like_data_row(row: list[str]) -> bool:
@@ -109,12 +85,6 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
     exclude_types = raw_exclude if (income_types or expense_types) else set()
     status_col = mapping.get("status_col")
     completed_status = (mapping.get("completed_status") or "").lower().strip()
-    # Sanity-check: if completed_status never appears in the actual data, the AI
-    # made a bad mapping (e.g. put a column name as the status value). Disable filter.
-    if status_col and completed_status:
-        if not any(row.get(status_col, "").strip().lower() == completed_status for row in rows):
-            status_col = None
-            completed_status = ""
     credit_col = mapping.get("credit_col")
     debit_col = mapping.get("debit_col")
     amount_col = mapping.get("amount")
@@ -189,17 +159,8 @@ def apply_mapping(rows: list[dict], mapping: dict) -> list[dict]:
         description = get("description") or vendor
 
         category_raw = get("category") or ""
-        is_transfer = False
 
-        # Category column explicitly says "Internal Transfer / Transfer In / Transfer Out"
-        if _TRANSFER_CATEGORY_RE.search(category_raw):
-            is_transfer = True
-
-        # Description or vendor matches known transfer patterns
-        if _TRANSFER_RE.search(vendor) or _TRANSFER_RE.search(description):
-            is_transfer = True
-
-        if is_transfer:
+        if _is_transfer(vendor, description, category_raw):
             tx_type = "transfer-in" if tx_type == "income" else "transfer-out"
             vendor = "Internal Transfer"
 

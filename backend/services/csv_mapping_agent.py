@@ -1,20 +1,37 @@
 """
 CSV column mapping pipeline using LangChain LCEL.
-Replaces the monolithic MAPPING_PROMPT + guards with two focused agents:
 
-  ┌──────────────────────┐
-  │  Core Columns Agent  │  date, vendor, amount (or debit/credit), description
-  └──────────┬───────────┘
-             │
-             ▼
-  ┌───────────────────────────┐
-  │  Row Classification Agent │  sign_based, type_col, income/expense types,
-  │                           │  status filter, tax, category, invoice_number
-  └───────────────────────────┘
-             │
-             ▼
-       Python resolver
-  (column name resolution, list value validation, vendor fallback)
+  ┌──────────────────────────┐   ┌────────────────────────────────┐
+  │   Core Columns Agent     │   │      Pattern Detector          │
+  │   (LLM, num_ctx=2048)    │   │      (regex, no LLM)           │
+  │                          │   │                                │
+  │   date, vendor,          │   │   Amount / Debit / Credit      │
+  │   amount, description    │   │   Date, Merchant Name          │
+  └────────────┬─────────────┘   └───────────────┬────────────────┘
+               │ on success                       │ always runs;
+               ▼                                  │ wins on amount/debit/credit
+  ┌────────────────────────────┐                  │
+  │  Row Classification Agent  │                  │
+  │  (LLM, num_ctx=2048)       │                  │
+  │                            │                  │
+  │  sign_based, type_col,     │                  │
+  │  income/expense types,     │                  │
+  │  exclude types, status,    │                  │
+  │  tax, category, invoice    │                  │
+  └────────────┬───────────────┘                  │
+               │                                  │
+               └──────────────┬───────────────────┘
+                              ▼
+                       Python Resolver
+               ┌──────────────────────────────┐
+               │  merge LLM + pattern output  │
+               │  amount: monetary check      │
+               │  vendor: metadata guard      │
+               │          + empty fallback    │
+               │  status: name + value check  │
+               │  invoice: account guard      │
+               │  category: word-count check  │
+               └──────────────────────────────┘
 """
 
 import logging
@@ -147,15 +164,16 @@ _CORE_PROMPT = ChatPromptTemplate.from_messages([
 Map a financial CSV export to standard fields. Return the exact column names as they appear.
 
 Vendor rules (priority order):
-  1. "Merchant Name", "Merchant" — bank-assigned clean name, always prefer
-  2. "Transaction Details", "Narrative", "Description", "Details", "Memo" — raw bank description
-  3. NEVER use these — they are payment metadata, not merchant names:
+  1. for headless csvs with generic col_0, col_1, ... names: the vendor column is almost always the only text column — use that.
+  2. "Merchant Name", "Merchant" — bank-assigned clean name, always prefer
+  3. "Transaction Details", "Narrative", "Description", "Details", "Memo" — raw bank description
+  4. NEVER use these — they are payment metadata, not merchant names:
      "Transaction Type", "Type", "Account Number", "Account", "Bank Account",
      "Card", "Serial", "Reference", "Balance", "Status", "Method", "Category"
 
 Amount rules (IMPORTANT):
-  - NEVER set amount to balance, account number, or identifier columns
-  - If there are TWO separate debit and credit columns: set amount=null and use debit_col + credit_col
+  - Amount is either a single signed column, or separate debit and credit columns. NEVER both.
+  - If there are TWO separate debit and credit columns: set amount=null and use debit_col + credit_col, e.g. debit_col: "Debit Amount", credit_col: "Credit Amount".
   - For a single signed amount column: set amount to that column (must NOT be null)
   - For headerless CSVs (col_0, col_1, …): col_1 is almost always the transaction amount
 
@@ -165,10 +183,13 @@ Description rules:
   - If there is only one text column, set description = vendor
 
 Date rules:
-  - Prefer "Date" over "Processed On", "Settlement Date", "Value Date"
-  - For headerless CSVs (col_0, col_1, …): identify the date column by its date-formatted values
+  - Identify the date column by its date-formatted values, e.g. "2024-03-15", "15/03/2024", "Mar 15, 2024".
 
-All values must be exact column names from the headers list.
+Important:
+  - for headless CSVs with generic col_0, col_1, ... use the generated column names exactly as they appear.
+  - for CSVs with headers, return the exact column name from the headers list.
+  - if the column has no values in the sample rows, it is not a valid column — return null for those fields.
+  - All values must be exact column names from the headers list.
 Return ONLY the JSON object."""),
     ("human", "Headers: {headers}\n\nSample rows:\n{sample}"),
 ])
@@ -205,16 +226,11 @@ _CLASSIFICATION_PROMPT = ChatPromptTemplate.from_messages([
 Analyse how a financial CSV classifies each row as income or expense, and identify filter columns.
 
 sign_based=true  → amount sign determines direction (positive=income, negative=expense)
-                   Use for: ANZ, CommBank, NAB single-amount exports; and Westpac (which uses
-                   separate Debit/Credit columns — both are positive; direction comes from which
-                   column has a value)
-sign_based=false → a named column contains explicit labels like "Sale", "Fee", "Refund"
+
+sign_based=false → a named column contains explicit labels like "Sale", "Fee", "Refund", "Debit", "Credit"
                    Use for: PayPal, Stripe, Etsy, marketplace exports
 
 If sign_based=true: set type_col=null and income_types/expense_types/exclude_types=[]
-
-Westpac note: "Serial" is a transaction serial number — use as invoice_number.
-              "Bank Account" is an account identifier — not vendor, not status.
 
 category: if the CSV has a "Category" or "Spend Category" column with human-readable values
           (e.g. "Dining", "Shopping", "Transport") set this. Bank-assigned categories are useful.
@@ -224,8 +240,13 @@ status_col: ONLY set if a column explicitly tracks settlement state (values like
             Do NOT set status_col to columns named "Type", "Transaction Type", "Method", "Mode", or "Category"
 
 invoice_number: ONLY a per-transaction reference (Order #, Invoice #, Confirmation #, Transaction ID)
-                Do NOT use account numbers, card numbers, customer IDs, or "Account Number"
+                Do NOT use account numbers, card numbers, customer IDs, date, or "Account Number"
 
+Important:
+  - for headless CSVs with generic col_0, col_1, ... use the generated column names exactly as they appear.
+  - for CSVs with headers, return the exact column name from the headers list (e.g. "category": "Category").
+  - All values must be exact column names from the headers list.
+  - if the column has no values in the sample rows, it is not a valid column — return null for those fields.
 Return ONLY the JSON object."""),
     ("human", "Headers: {headers}\n\nSample rows:\n{sample}"),
 ])
@@ -417,6 +438,8 @@ def _build_mapping(state: CSVMappingState) -> dict:
         reserved = {date, amount, debit_col, credit_col}
         for h in state.headers:
             if h in reserved:
+                continue
+            if _VENDOR_COL_BLOCK.search(h):
                 continue
             vals = [row.get(h, "").strip() for row in rows[:10] if row.get(h, "").strip()]
             if vals and not _NUM_RE.match(vals[0]) and not _DATE_RE.match(vals[0]):

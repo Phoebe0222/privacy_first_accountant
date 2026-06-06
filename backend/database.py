@@ -75,14 +75,6 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass  # Column already exists
-        # Ensure default is False — reset any rows that were seeded True by the old migration
-        try:
-            conn.execute(__import__("sqlalchemy").text(
-                "UPDATE transactions SET business = 0 WHERE business = 1"
-            ))
-            conn.commit()
-        except Exception:
-            pass
 
     # Add built_in column to vendor_rules if missing
     with engine.connect() as conn:

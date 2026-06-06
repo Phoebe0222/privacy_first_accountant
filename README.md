@@ -77,44 +77,9 @@ File storage:
 Vector DB:
 - Chromadb
 
-
-
-## Core RAG flow 
-- ### chat (maybe)
-1. user asks question
-2. embed the question (convert into a vector)
-3. search vector DB for similar vectors
-4. build the prompt with the vector (build the context)
-5. LLM answers with retrieved infomation 
-
-- ### extraction
-1. a new transaction (either model generated or user created)
-2. embed the transaction
-3. search for similar transactions
-4. add the similar transactions in the prompt
-5. better categorization and detect anomoly 
-
-- ### ATO rulings
-
-```
-{
-  "rule": "gst_threshold",
-  "threshold": 75000,
-  "condition": "annual_turnover"
-}
-```
-
-- ### tax interpretations
-
-- ### GST categories
-
-- ### deduction examples
-
 ## Multi-agents framework 
 - ### Extraction agent 
 ```
-Extraction pipeline using LangChain LCEL.
-
   ┌─────────────────────┐
   │  Clean Text         │  Decode HTML entities, strip invisible Unicode spacers
   └──────────┬──────────┘
@@ -149,9 +114,77 @@ Extraction pipeline using LangChain LCEL.
   └─────────────────────┘
 ```
 - ### CSV column mapping agent 
+```
+  ┌─────────────────────┐   ┌─────────────────────┐
+  │  Core Columns Agent │   │  Pattern Detector   │
+  │  (LLM)              │   │  (regex, no LLM)    │
+  └──────────┬──────────┘   └──────────┬──────────┘
+             │                         │
+             ▼                         │
+  ┌─────────────────────┐              │
+  │  Classification     │              │
+  │  Agent (LLM)        │              │
+  └──────────┬──────────┘              │
+             └──────────┬─────────────┘
+                        ▼
+                 Python Resolver
+                 (merge + validate)
+```
 - ### Vendor Normalizer
+```
+  ┌──────────────────┐
+  │  Rules Step      │  Unwrap processor/bank prefix, strip noise, short-name check
+  └──────────┬───────┘
+             │ unresolved (> 3 words)
+             ▼
+  ┌──────────────────┐
+  │  RAG Step        │  Find consensus name from past transactions (≥80% agreement)
+  └──────────┬───────┘
+             │ unresolved
+             ▼
+  ┌──────────────────┐
+  │  LLM Step        │  Extract brand name for complex / first-seen cases
+  └──────────────────┘
+```
 - ### Categorise agent 
+```
+                ┌──────────────────┐
+  state ──────► │  apply_rules     │ (pure Python, no LLM)
+                └────────┬─────────┘
+                         │ unresolved
+                         ▼
+                ┌──────────────────┐
+                │  search_history  │ (RAG consensus)
+                └────────┬─────────┘
+                         │ unresolved
+                         ▼
+                ┌──────────────────┐
+                │  llm_categorize  │ (ChatOllama + structured output)
+                └──────────────────┘
+```
 - ### Chat agent
+```
+```
+## Core RAG flow 
+- ### chat (maybe)
+1. user asks question
+2. embed the question (convert into a vector)
+3. search vector DB for similar vectors
+4. build the prompt with the vector (build the context)
+5. LLM answers with retrieved infomation 
+
+- ### extraction
+1. a new transaction (either model generated or user created)
+2. embed the transaction
+3. search for similar transactions
+4. add the similar transactions in the prompt
+5. better categorization and detect anomoly 
+
+- ### tax interpretations
+
+- ### GST categories
+
+- ### deduction examples
 
 
 ## Roadmap
