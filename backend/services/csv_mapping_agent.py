@@ -185,7 +185,7 @@ async def _core_agent(state: CSVMappingState) -> CSVMappingState:
     headers_str = ", ".join(f'"{h}"' for h in state.headers)
     sample_str = _format_sample(state.sample_rows)
     try:
-        chain = _CORE_PROMPT | get_llm(model=CSV_MAP_MODEL).with_structured_output(CSVCoreMappingResult)
+        chain = _CORE_PROMPT | get_llm(model=CSV_MAP_MODEL, num_ctx=2048).with_structured_output(CSVCoreMappingResult)
         result: CSVCoreMappingResult = await chain.ainvoke({
             "headers": headers_str,
             "sample": sample_str,
@@ -235,7 +235,7 @@ async def _classification_agent(state: CSVMappingState) -> CSVMappingState:
     headers_str = ", ".join(f'"{h}"' for h in state.headers)
     sample_str = _format_sample(state.sample_rows)
     try:
-        chain = _CLASSIFICATION_PROMPT | get_llm(model=CSV_MAP_MODEL).with_structured_output(CSVRowClassificationResult)
+        chain = _CLASSIFICATION_PROMPT | get_llm(model=CSV_MAP_MODEL, num_ctx=2048).with_structured_output(CSVRowClassificationResult)
         result: CSVRowClassificationResult = await chain.ainvoke({
             "headers": headers_str,
             "sample": sample_str,

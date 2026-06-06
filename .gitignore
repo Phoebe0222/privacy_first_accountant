@@ -10,3 +10,4 @@ test_csv.py
 *.csv
 *.pdf
 *.jpg
+/scripts/

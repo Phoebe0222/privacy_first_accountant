@@ -15,12 +15,15 @@ try:
     from langchain_ollama import ChatOllama
     _llm_cache: dict[str, "ChatOllama"] = {}
 
-    def get_llm(model: Optional[str] = None, temperature: int = 0) -> "ChatOllama":
+    def get_llm(model: Optional[str] = None, temperature: int = 0, num_ctx: Optional[int] = None) -> "ChatOllama":
         _model = model or os.getenv("EXTRACT_MODEL", "llama3.2:3b")
         _base = os.getenv("OLLAMA_BASE", "http://localhost:11434")
-        key = f"{_model}:{temperature}"
+        key = f"{_model}:{temperature}:{num_ctx}"
         if key not in _llm_cache:
-            _llm_cache[key] = ChatOllama(model=_model, temperature=temperature, base_url=_base)
+            kwargs = dict(model=_model, temperature=temperature, base_url=_base)
+            if num_ctx is not None:
+                kwargs["num_ctx"] = num_ctx
+            _llm_cache[key] = ChatOllama(**kwargs)
         return _llm_cache[key]
 
 except ImportError:

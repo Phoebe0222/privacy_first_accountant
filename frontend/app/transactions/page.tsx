@@ -294,7 +294,6 @@ export default function TransactionsPage() {
                       ) : (
                         <div>
                           <span className="font-medium text-gray-800">{t.vendor}</span>
-                          {t.source_ref && <p className="text-xs text-gray-400 mt-0.5">{t.source_ref}</p>}
                         </div>
                       )}
                     </td>
