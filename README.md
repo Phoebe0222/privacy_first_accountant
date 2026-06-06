@@ -207,8 +207,3 @@ Vector DB:
 - accountant collaboration mode
 - one-click export to accountant
 - audit trail
-
-
-## Prompt Improvement
-
-4. Vendor normalisation: Different emails might write the same vendor differently (AWS, Amazon Web Services, AMAZON WEB SVCS). RAG can find existing vendor names and prompt the model to match them.
