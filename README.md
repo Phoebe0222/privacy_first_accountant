@@ -148,8 +148,10 @@ Extraction pipeline using LangChain LCEL.
   │  Categorize         │  Rules → history consensus → LLM
   └─────────────────────┘
 ```
-- ### Categorise agent 
 - ### CSV column mapping agent 
+- ### Vendor Normalizer
+- ### Categorise agent 
+- ### Chat agent
 
 
 ## Roadmap
