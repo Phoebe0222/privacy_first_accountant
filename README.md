@@ -47,11 +47,41 @@ The UI has a dashboard with cost and revenue, cash flows etc.
 The user can ask the agent for numbers, charts, reports etc. and ask the agent to change some transactions. 
 
 ### 5. Bank reconciliation 
-### 6. Anomaly detection
-### 7. Tax deductibles
+The user can reconciliate the bank transactions with receipts from different sources, e.g. email, pdf receipts, images. 
 
-for small business
+### 6. Anomaly detection
+Comparing to similar past transactions, if the transaction is more than twice or less than half of the average, it will be flagged.
+
+### 7. Tax deductibles
+For any tax payer, estimate the tax deductions, based on rules and llm. 
+
 ### 8. BAS/GST reports
+For small business, estimate BAS/GST based on the sales. This is deterministic.
+
+```
+Inputs
+  business transactions only  (business = true, source = bank_csv or manual)
+
+G1  — Total Sales
+  = Σ amount  where  type = income  AND  category = sales
+
+G11 — Total Purchases
+  = Σ amount  where  type = expense
+
+1A  — GST Collected  (on sales)
+  = Σ tax    where  type = income  AND  category = sales
+
+1B  — Input Tax Credits  (on purchases)
+  = Σ tax    where  type = expense
+
+Net GST payable = 1A − 1B
+
+GST registration warning
+  annualised G1 = G1 × 4  (quarterly)  or  G1 × 1  (annual)
+  warn if annualised G1 ≥ $75,000
+```
+
+
 ### 9. Budgeting
 ### 10. Cash flow forecasting 
 

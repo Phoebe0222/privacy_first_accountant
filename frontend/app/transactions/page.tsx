@@ -3,7 +3,7 @@ import React, { useEffect, useState } from "react";
 import { api, Transaction, ReconciliationMatch } from "@/lib/api";
 import VendorRulesTab from "@/components/VendorRulesTab";
 
-const CATEGORIES = ["all", "food", "grocery", "drink", "transport", "travel", "utilities", "software", "marketing", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
+const CATEGORIES = ["all", "food", "grocery", "drink", "transport", "travel", "utilities", "software", "marketing", "sales", "revenue", "salary", "refund", "office", "subscription", "shopping", "leisure", "material", "fee", "gym", "medical", "other"];
 const FORM_CATEGORIES = CATEGORIES.filter((c) => c !== "all");
 const EMPTY_FORM = { date: "", vendor: "", amount: "", tax: "", category: "other", type: "expense" as "income" | "expense", description: "" };
 

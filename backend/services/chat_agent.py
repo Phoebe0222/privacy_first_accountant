@@ -37,7 +37,7 @@ def search_transactions(
     tx_type must be 'income' or 'expense'.
     category must be one of: food, grocery, drink, transport, travel, utilities,
     software, marketing, fee, gym, medical, office, subscription, shopping,
-    leisure, material, other, salary, revenue, refund.
+    leisure, material, other, sales, revenue, salary, refund.
     Returns matching transactions with their IDs, dates, vendors, amounts, categories, and types.
     """
     from backend.database import SessionLocal

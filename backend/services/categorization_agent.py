@@ -180,7 +180,7 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "Valid expense categories: food, grocery, drink, transport, travel, utilities, "
         "software, marketing, fee, gym, medical, office, subscription, shopping, "
         "leisure, material, other\n"
-        "Valid income categories: salary, revenue, refund"
+        "Valid income categories: sales (product/service sales with GST), revenue (dividends, rent, other non-GST income), salary, refund"
     )),
 ])
 
