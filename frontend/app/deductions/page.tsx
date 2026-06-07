@@ -277,26 +277,61 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
       <hr className="border-gray-100" />
 
       {/* Combined */}
-      <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-4">
         <h3 className="font-semibold text-gray-700">Combined Tax Estimate</h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-center">
-          <div>
-            <p className="text-xs text-gray-400">Total Income</p>
-            <p className="text-xl font-bold text-green-600">{fmt(combined.total_income)}</p>
+
+        {combined.biz_is_loss ? (
+          <div className="space-y-4">
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <span className="text-amber-500 mt-0.5">⚠</span>
+              <div className="text-xs text-amber-800 space-y-1">
+                <p className="font-medium">Business is in a loss of {fmt(Math.abs(combined.biz_net))} — non-commercial loss rules apply (Div 35 ITAA 1997).</p>
+                <p>A business loss cannot automatically offset salary income. Two scenarios below depending on whether you pass an ATO test.</p>
+                {combined.ncl_tests_url && (
+                  <a href={combined.ncl_tests_url} target="_blank" rel="noreferrer" className="underline hover:text-amber-900">ATO: Non-commercial loss tests →</a>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white rounded-lg border border-gray-100 p-4 space-y-2">
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">NCL rules apply (loss deferred)</p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Taxable income</span><span className="font-medium">{fmt(combined.ncl_applies!.taxable_income)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Est. tax payable</span><span className="font-bold text-red-500">{fmt(combined.ncl_applies!.estimated_tax)}</span></div>
+                </div>
+                <p className="text-xs text-gray-400">{combined.ncl_applies!.note}</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-100 p-4 space-y-2">
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">NCL test passed (loss offsets salary)</p>
+                <div className="space-y-1">
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Taxable income</span><span className="font-medium">{fmt(combined.ncl_exempt!.taxable_income)}</span></div>
+                  <div className="flex justify-between text-sm"><span className="text-gray-500">Est. tax payable</span><span className="font-bold text-red-500">{fmt(combined.ncl_exempt!.estimated_tax)}</span></div>
+                </div>
+                <p className="text-xs text-gray-400">{combined.ncl_exempt!.note}</p>
+              </div>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-400">Total Deductible</p>
-            <p className="text-xl font-bold text-blue-600">{fmt(combined.total_deductible)}</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-xs text-gray-400">Salary taxable</p>
+              <p className="text-lg font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Business net profit</p>
+              <p className="text-lg font-bold text-green-600">{fmt(combined.biz_net)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Combined taxable</p>
+              <p className="text-lg font-bold text-gray-800">{fmt(combined.taxable_income!)}</p>
+            </div>
+            <div className="col-span-3 pt-1 border-t border-gray-100">
+              <p className="text-xs text-gray-400">Est. tax payable</p>
+              <p className="text-2xl font-bold text-red-500">{fmt(combined.estimated_tax!)}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs text-gray-400">Taxable Income</p>
-            <p className="text-xl font-bold text-gray-800">{fmt(combined.taxable_income)}</p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-400">Est. Tax Payable</p>
-            <p className="text-xl font-bold text-red-500">{fmt(combined.estimated_tax)}</p>
-          </div>
-        </div>
+        )}
         <p className="text-xs text-gray-400">{combined.tax_brackets}</p>
       </div>
 

@@ -217,9 +217,45 @@ async def run_tax_estimate(year: int, db) -> dict:
     )
     biz_taxable = max(0.0, round(biz_income - biz_deductible, 2))
 
-    # ── Combined ──────────────────────────────────────────────────────────────
-    combined_taxable = round(salary_taxable + biz_taxable, 2)
-    estimated_tax    = _calc_tax(combined_taxable)
+    # ── Combined — non-commercial loss rules (Div 35 ITAA 1997) ─────────────
+    biz_net = round(biz_income - biz_deductible, 2)
+    biz_is_loss = biz_net < 0
+
+    if biz_is_loss:
+        # Business is in loss — cannot automatically offset salary.
+        # Scenario A: NCL rules apply → only salary taxable, loss deferred.
+        # Scenario B: NCL test passed or ATI > $250k → loss offsets salary.
+        taxable_ncl_applies  = salary_taxable                            # loss deferred
+        taxable_ncl_exempt   = max(0.0, round(salary_taxable + biz_net, 2))  # loss offsets
+
+        combined = {
+            "salary_taxable":        salary_taxable,
+            "biz_net":               biz_net,
+            "biz_is_loss":           True,
+            "ncl_applies": {
+                "taxable_income":    taxable_ncl_applies,
+                "estimated_tax":     _calc_tax(taxable_ncl_applies),
+                "note":              "Business loss deferred — cannot offset salary until an ATO non-commercial loss test is passed or adjusted taxable income exceeds $250,000.",
+            },
+            "ncl_exempt": {
+                "taxable_income":    taxable_ncl_exempt,
+                "estimated_tax":     _calc_tax(taxable_ncl_exempt),
+                "note":              "If you pass one of the four NCL tests (income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k), the loss can offset your salary.",
+            },
+            "ncl_tests_url":         "https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss",
+            "tax_brackets":          "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
+        }
+    else:
+        # Business is profitable — combine normally.
+        combined_taxable = round(salary_taxable + biz_taxable, 2)
+        combined = {
+            "salary_taxable":        salary_taxable,
+            "biz_net":               biz_net,
+            "biz_is_loss":           False,
+            "taxable_income":        combined_taxable,
+            "estimated_tax":         _calc_tax(combined_taxable),
+            "tax_brackets":          "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
+        }
 
     return {
         "tax_year": f"FY{tax_year}",
@@ -238,15 +274,10 @@ async def run_tax_estimate(year: int, db) -> dict:
             "taxable_income":    biz_taxable,
             "items":             biz_items,
         },
-        "combined": {
-            "total_income":      round(salary_income + biz_income, 2),
-            "total_deductible":  round(salary_deductible + biz_deductible, 2),
-            "taxable_income":    combined_taxable,
-            "estimated_tax":     estimated_tax,
-            "tax_brackets":      "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
-        },
+        "combined":  combined,
         "note": (
-            "Estimate only. Does not account for offsets, levies, prior losses, "
-            "depreciation, or personal circumstances. Consult a registered tax agent."
+            "Estimate only. Does not account for offsets, depreciation, prior losses, "
+            "or personal circumstances. Non-commercial loss rules (Div 35 ITAA 1997) apply "
+            "when business makes a loss. Consult a registered tax agent."
         ),
     }

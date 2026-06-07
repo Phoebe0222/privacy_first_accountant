@@ -326,11 +326,17 @@ export interface AITaxEstimate {
   salary: AITaxSection;
   business: AITaxSection;
   combined: {
-    total_income: number;
-    total_deductible: number;
-    taxable_income: number;
-    estimated_tax: number;
+    salary_taxable: number;
+    biz_net: number;
+    biz_is_loss: boolean;
     tax_brackets: string;
+    // profitable path
+    taxable_income?: number;
+    estimated_tax?: number;
+    // loss path (NCL rules)
+    ncl_applies?: { taxable_income: number; estimated_tax: number; note: string };
+    ncl_exempt?: { taxable_income: number; estimated_tax: number; note: string };
+    ncl_tests_url?: string;
   };
   note: string;
   error?: string;
