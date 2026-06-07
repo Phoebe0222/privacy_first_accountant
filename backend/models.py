@@ -23,6 +23,7 @@ class Transaction(Base):
     needs_review = Column(Boolean, default=False, nullable=True)
     category_confidence = Column(Float, nullable=True)
     business = Column(Boolean, default=False, nullable=True)
+    tax_kind = Column(String, default="na", nullable=True)  # "business" | "employment" | "na"
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -95,6 +96,14 @@ class AppSettings(Base):
 
     key = Column(String, primary_key=True)
     value = Column(String, nullable=True)
+
+
+class AITaxCache(Base):
+    __tablename__ = "ai_tax_cache"
+
+    year = Column(Integer, primary_key=True)
+    result_json = Column(Text, nullable=False)
+    computed_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ReconciliationMatch(Base):

@@ -49,3 +49,4 @@ class TransactionUpdate(BaseModel):
     invoice_number: Optional[str] = None
     needs_review: Optional[bool] = None
     business: Optional[bool] = None
+    tax_kind: Optional[str] = None  # "business" | "employment" | "na"

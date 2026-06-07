@@ -182,15 +182,16 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                     data = {**tx, "needs_review": False, "category_confidence": 1.0}
                 else:
                     key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
-                    cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True, "business": False})
+                    cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True, "tax_kind": "na"})
                     data = {**tx, "category": cat["category"],
                             "needs_review": cat["needs_review"],
                             "category_confidence": cat["confidence"],
-                            "business": cat.get("business", False)}
+                            "tax_kind": cat.get("tax_kind", "na"),
+                            "business": cat.get("tax_kind", "na") == "business"}
 
-                # Inherit user-set business flag from any prior transaction with this vendor
+                # Inherit user-set tax_kind from any prior transaction with this vendor
                 if tx.get("vendor") in vendor_business:
-                    data = {**data, "business": True}
+                    data = {**data, "tax_kind": "business", "business": True}
 
                 t = _build_transaction(data, source=source, source_ref=filename, raw_text="")
                 db.add(t)

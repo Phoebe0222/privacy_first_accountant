@@ -110,33 +110,7 @@ def reset_rules(user_type: str, db: Session = Depends(get_db)):
 
 # ── Estimate ──────────────────────────────────────────────────────────────────
 
-@router.get("/estimate")
-def estimate(year: int, db: Session = Depends(get_db)):
-    """
-    Calculate deductible amounts for the Australian financial year starting July `year`.
-    Only counts source IN ("bank_csv", "manual") + business == True.
-    """
-    date_from = f"{year}-07-01"
-    date_to = f"{year + 1}-06-30"
-
-    user_type_row = db.get(AppSettings, "user_type")
-    user_type = user_type_row.value if user_type_row else "small_business"
-
-    rules = {r.category: r for r in db.query(DeductionRule).filter(DeductionRule.user_type == user_type).all()}
-
-    expenses = (
-        db.query(Transaction)
-        .filter(
-            Transaction.source.in_(_PRIMARY_SOURCES),
-            Transaction.business == True,  # noqa: E712
-            Transaction.type == "expense",
-            Transaction.date >= date_from,
-            Transaction.date <= date_to,
-        )
-        .all()
-    )
-
-    # Group by category
+def _calc_section(expenses: list, rules: dict) -> dict:
     by_cat: dict[str, float] = {}
     for t in expenses:
         cat = t.category or "other"
@@ -161,11 +135,83 @@ def estimate(year: int, db: Session = Depends(get_db)):
         })
 
     return {
-        "year": year,
-        "period": f"FY{year}–{str(year + 1)[2:]}",
-        "date_range": f"{date_from} to {date_to}",
-        "user_type": user_type,
         "items": items,
         "total_deductible": round(total_deductible, 2),
         "total_expenses": round(sum(by_cat.values()), 2),
     }
+
+
+@router.get("/estimate")
+def estimate(year: int, db: Session = Depends(get_db)):
+    """
+    Calculate deductible amounts split by tax_kind:
+      business    → transactions marked as Business
+      employment  → transactions marked as Employment
+    """
+    date_from = f"{year}-07-01"
+    date_to = f"{year + 1}-06-30"
+
+    user_type_row = db.get(AppSettings, "user_type")
+    user_type = user_type_row.value if user_type_row else "small_business"
+
+    biz_rules = {r.category: r for r in db.query(DeductionRule).filter(DeductionRule.user_type == user_type).all()}
+    emp_rules = {r.category: r for r in db.query(DeductionRule).filter(DeductionRule.user_type == "individual_salary").all()}
+
+    def _expenses(tax_kind: str):
+        return (
+            db.query(Transaction)
+            .filter(
+                Transaction.source.in_(_PRIMARY_SOURCES),
+                Transaction.tax_kind == tax_kind,
+                Transaction.type == "expense",
+                Transaction.date >= date_from,
+                Transaction.date <= date_to,
+            )
+            .all()
+        )
+
+    business    = _calc_section(_expenses("business"),    biz_rules)
+    employment  = _calc_section(_expenses("employment"),  emp_rules)
+
+    return {
+        "year": year,
+        "period": f"FY{year}–{str(year + 1)[2:]}",
+        "date_range": f"{date_from} to {date_to}",
+        "user_type": user_type,
+        "business": business,
+        "employment": employment,
+        "total_deductible": round(business["total_deductible"] + employment["total_deductible"], 2),
+        "total_expenses": round(business["total_expenses"] + employment["total_expenses"], 2),
+        # keep flat items list for backwards compat (business section)
+        "items": business["items"],
+    }
+
+
+@router.get("/ai-estimate")
+async def ai_estimate(year: int, force_refresh: bool = False, db: Session = Depends(get_db)):
+    """
+    AI-powered tax estimate: uses ATO rules (RAG) + LLM to assess deductibility
+    of each business expense category and estimate tax payable.
+    Results are cached in the DB. Pass force_refresh=true to recompute.
+    `year` is the FY start year (e.g. year=2025 → FY2025-26).
+    """
+    import json
+    from backend.models import AITaxCache
+    from backend.services.tax_agent import run_tax_estimate
+
+    if not force_refresh:
+        cached = db.get(AITaxCache, year)
+        if cached:
+            return json.loads(cached.result_json)
+
+    result = await run_tax_estimate(year, db)
+
+    cached = db.get(AITaxCache, year)
+    if cached:
+        cached.result_json = json.dumps(result)
+        cached.computed_at = __import__("datetime").datetime.utcnow()
+    else:
+        db.add(AITaxCache(year=year, result_json=json.dumps(result)))
+    db.commit()
+
+    return result

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, DeductionRule, DeductionItem, DeductionsEstimate } from "@/lib/api";
+import { api, DeductionRule, DeductionItem, DeductionSection, DeductionsEstimate, AITaxEstimate, AITaxItem, AITaxSection } from "@/lib/api";
 
 type ATORule = { id: number; title: string; description: string };
 
@@ -13,17 +13,12 @@ function fmt(n: number) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n);
 }
 
-const USER_TYPES = [
-  { value: "individual_salary", label: "Salary" },
-  { value: "individual_abn",    label: "ABN" },
-  { value: "small_business",    label: "Small Business" },
-];
-
 export default function DeductionsPage() {
-  const [tab, setTab] = useState<"estimate" | "rules" | "ato">("estimate");
+  const [tab, setTab] = useState<"estimate" | "ai" | "rules" | "ato">("estimate");
   const [year, setYear] = useState(fyStartYear());
   const [userType, setUserType] = useState("small_business");
   const [estimate, setEstimate] = useState<DeductionsEstimate | null>(null);
+  const [aiEstimate, setAiEstimate] = useState<AITaxEstimate | null>(null);
   const [rules, setRules] = useState<DeductionRule[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -37,27 +32,20 @@ export default function DeductionsPage() {
     if (tab === "estimate") {
       setLoading(true);
       api.getDeductionsEstimate(year).then(setEstimate).finally(() => setLoading(false));
-    } else {
+    } else if (tab === "ai") {
+      setLoading(true);
+      setAiEstimate(null);
+      api.getAITaxEstimate(year, false).then(setAiEstimate).finally(() => setLoading(false));
+    } else if (tab === "rules") {
       api.getDeductionRules(userType).then(setRules);
     }
   }, [tab, year, userType]);
-
-  async function switchUserType(ut: string) {
-    setUserType(ut);
-    await api.updateDeductionSettings(ut);
-    if (tab === "estimate") {
-      setLoading(true);
-      api.getDeductionsEstimate(year).then(setEstimate).finally(() => setLoading(false));
-    } else {
-      api.getDeductionRules(ut).then(setRules);
-    }
-  }
 
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
         <h2 className="text-2xl font-bold text-gray-800">Deductions</h2>
-        <p className="text-sm text-gray-400 mt-1">Estimated tax-deductible expenses based on bank transactions marked as business.</p>
+        <p className="text-sm text-gray-400 mt-1">Estimated tax-deductible expenses based on bank transactions marked as Business or Employment.</p>
       </div>
 
       {/* Controls */}
@@ -66,84 +54,253 @@ export default function DeductionsPage() {
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
           {fyOptions.map((y) => <option key={y} value={y}>FY {y}–{String(y + 1).slice(2)}</option>)}
         </select>
-        <div className="flex gap-1">
-          {USER_TYPES.map(({ value, label }) => (
-            <button key={value} onClick={() => switchUserType(value)}
-              className={`px-3 py-2 rounded-lg text-sm transition-colors ${
-                userType === value ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
         <div className="ml-auto flex gap-2">
           <button onClick={() => setTab("estimate")} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === "estimate" ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600"}`}>Estimate</button>
+          <button onClick={() => setTab("ai")} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === "ai" ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600"}`}>AI Estimate</button>
           <button onClick={() => setTab("rules")} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === "rules" ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600"}`}>Rules</button>
           <button onClick={() => setTab("ato")} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab === "ato" ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600"}`}>ATO Context</button>
         </div>
       </div>
 
       {tab === "estimate" && (loading ? <p className="text-gray-400">Calculating…</p> : estimate && <EstimateTab estimate={estimate} />)}
+      {tab === "ai" && (loading ? (
+        <div className="space-y-2">
+          <p className="text-gray-500">Analysing transactions with ATO rules…</p>
+          <p className="text-xs text-gray-400">This may take a minute — the AI is assessing each expense category.</p>
+        </div>
+      ) : aiEstimate && (
+        <div className="space-y-4">
+          <div className="flex justify-end">
+            <button
+              onClick={() => { setLoading(true); setAiEstimate(null); api.getAITaxEstimate(year, true).then(setAiEstimate).finally(() => setLoading(false)); }}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              Refresh (rerun AI)
+            </button>
+          </div>
+          <AIEstimateTab result={aiEstimate} />
+        </div>
+      ))}
       {tab === "rules" && <RulesTab userType={userType} rules={rules} onRulesChange={setRules} />}
       {tab === "ato" && <ATOContextTab />}
     </div>
   );
 }
 
+function SectionTable({ section, emptyMsg }: { section: DeductionSection; emptyMsg: string }) {
+  if (section.items.length === 0) return <p className="text-sm text-gray-400">{emptyMsg}</p>;
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <tr>
+            <th className="px-4 py-3 text-left">Category</th>
+            <th className="px-4 py-3 text-right">Total Spent</th>
+            <th className="px-4 py-3 text-right">Rate</th>
+            <th className="px-4 py-3 text-right">Est. Deduction</th>
+            <th className="px-4 py-3 text-left text-gray-400">Note</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50">
+          {section.items.map((item) => (
+            <tr key={item.category} className="hover:bg-gray-50">
+              <td className="px-4 py-3">
+                <p className="font-medium text-gray-800">{item.label}</p>
+                <p className="text-xs text-gray-400 capitalize">{item.category.replace("_", " ")}</p>
+              </td>
+              <td className="px-4 py-3 text-right text-gray-700">{fmt(item.total_spent)}</td>
+              <td className="px-4 py-3 text-right">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded ${item.rate === 1 ? "bg-green-100 text-green-700" : item.rate >= 0.5 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"}`}>
+                  {Math.round(item.rate * 100)}%
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-green-700">{fmt(item.deductible_amount)}</td>
+              <td className="px-4 py-3 text-xs text-gray-400">{item.note ?? ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function EstimateTab({ estimate }: { estimate: DeductionsEstimate }) {
+  const [sectionTab, setSectionTab] = useState<"employment" | "business" | "combined">("employment");
+
+  const deductibleByTab = {
+    employment: estimate.employment.total_deductible,
+    business:   estimate.business.total_deductible,
+    combined:   estimate.total_deductible,
+  };
+
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex items-center justify-between">
-        <div>
-          <p className="text-xs text-gray-400">{estimate.period} · {estimate.date_range}</p>
-          <p className="text-xs text-gray-400 mt-0.5">Total business expenses: {fmt(estimate.total_expenses)}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-gray-400">Estimated total deductible</p>
-          <p className="text-3xl font-bold text-green-600">{fmt(estimate.total_deductible)}</p>
-        </div>
+      {/* Section tabs */}
+      <div className="flex gap-2">
+        {(["employment", "business", "combined"] as const).map((t) => (
+          <button key={t} onClick={() => setSectionTab(t)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${sectionTab === t ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
+            {t}
+          </button>
+        ))}
       </div>
 
-      {estimate.items.length === 0 ? (
-        <p className="text-gray-400 text-sm">No expense transactions found for this period.</p>
-      ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-              <tr>
-                <th className="px-4 py-3 text-left">Category</th>
-                <th className="px-4 py-3 text-right">Total Spent</th>
-                <th className="px-4 py-3 text-right">Rate</th>
-                <th className="px-4 py-3 text-right">Est. Deduction</th>
-                <th className="px-4 py-3 text-left text-gray-400">Note</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {estimate.items.map((item) => (
-                <tr key={item.category} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-gray-800">{item.label}</p>
-                    <p className="text-xs text-gray-400 capitalize">{item.category.replace("_", " ")}</p>
-                  </td>
-                  <td className="px-4 py-3 text-right text-gray-700">{fmt(item.total_spent)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded ${item.rate === 1 ? "bg-green-100 text-green-700" : item.rate >= 0.5 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"}`}>
-                      {Math.round(item.rate * 100)}%
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right font-medium text-green-700">{fmt(item.deductible_amount)}</td>
-                  <td className="px-4 py-3 text-xs text-gray-400">{item.note ?? ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400">{estimate.period} · {estimate.date_range}</p>
+        <p className="text-sm font-medium text-green-600">{fmt(deductibleByTab[sectionTab])} deductible</p>
+      </div>
+
+      {sectionTab === "employment" && (
+        <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions for this period. Mark transactions as Employment in the Transactions page." />
+      )}
+
+      {sectionTab === "business" && (
+        <SectionTable section={estimate.business} emptyMsg="No business expense transactions for this period. Mark transactions as Business in the Transactions page." />
+      )}
+
+      {sectionTab === "combined" && (
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <div className="flex justify-between items-baseline">
+              <h4 className="text-sm font-semibold text-gray-600">Employment</h4>
+              <span className="text-xs text-green-600">{fmt(estimate.employment.total_deductible)} deductible</span>
+            </div>
+            <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions." />
+          </div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-baseline">
+              <h4 className="text-sm font-semibold text-gray-600">Business</h4>
+              <span className="text-xs text-green-600">{fmt(estimate.business.total_deductible)} deductible</span>
+            </div>
+            <SectionTable section={estimate.business} emptyMsg="No business expense transactions." />
+          </div>
+          <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 flex justify-between items-center">
+            <span className="text-sm font-semibold text-gray-700">Total Deductible</span>
+            <span className="text-2xl font-bold text-green-600">{fmt(estimate.total_deductible)}</span>
+          </div>
         </div>
       )}
 
-      <p className="text-xs text-gray-400">
-        Estimates only — consult a registered tax agent before lodging.
-        Only bank transactions marked as Business are included.
-      </p>
+      <p className="text-xs text-gray-400">Estimates only — consult a registered tax agent before lodging.</p>
+    </div>
+  );
+}
+
+function DeductionTable({ items }: { items: AITaxItem[] }) {
+  if (items.length === 0) return <p className="text-xs text-gray-400 px-1">No transactions found for this section.</p>;
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+          <tr>
+            <th className="px-4 py-3 text-left">Category</th>
+            <th className="px-4 py-3 text-right">Spent</th>
+            <th className="px-4 py-3 text-right">Rate</th>
+            <th className="px-4 py-3 text-right">Deductible</th>
+            <th className="px-4 py-3 text-left">Reasoning</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50">
+          {items.map((item) => (
+            <tr key={item.category} className="hover:bg-gray-50 align-top">
+              <td className="px-4 py-3">
+                <p className="font-medium text-gray-800 capitalize">{item.category.replace("_", " ")}</p>
+                <p className="text-xs text-gray-400">{item.transaction_count} txns</p>
+              </td>
+              <td className="px-4 py-3 text-right text-gray-700">{fmt(item.total_spent)}</td>
+              <td className="px-4 py-3 text-right">
+                <span className={`text-xs font-medium px-2 py-0.5 rounded ${item.deductible_rate === 1 ? "bg-green-100 text-green-700" : item.deductible_rate >= 0.5 ? "bg-blue-100 text-blue-700" : "bg-gray-100 text-gray-500"}`}>
+                  {Math.round(item.deductible_rate * 100)}%
+                </span>
+              </td>
+              <td className="px-4 py-3 text-right font-medium text-green-700">{fmt(item.deductible_amount)}</td>
+              <td className="px-4 py-3 max-w-xs">
+                <p className="text-xs text-gray-600">{item.reasoning}</p>
+                {item.ato_reference && <p className="text-xs text-gray-400 mt-0.5 italic">{item.ato_reference}</p>}
+                {item.ato_urls.slice(0, 1).map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer"
+                    className="text-xs text-blue-500 hover:underline mt-0.5 block truncate">{url}</a>
+                ))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SectionSummary({ label, section }: { label: string; section: AITaxSection }) {
+  return (
+    <div className="grid grid-cols-3 gap-3 text-center text-sm">
+      <div>
+        <p className="text-xs text-gray-400">{label} Income</p>
+        <p className="font-bold text-green-600">{fmt(section.income)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-400">Deductible</p>
+        <p className="font-bold text-blue-600">− {fmt(section.total_deductible)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-400">Taxable</p>
+        <p className="font-bold text-gray-800">{fmt(section.taxable_income)}</p>
+      </div>
+    </div>
+  );
+}
+
+function AIEstimateTab({ result }: { result: AITaxEstimate }) {
+  if (result.error) return <p className="text-red-500 text-sm">{result.error}</p>;
+  const { salary, business, combined } = result;
+
+  return (
+    <div className="space-y-6">
+
+      {/* Salary section */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-gray-700">Salary Income</h3>
+        <SectionSummary label="Salary" section={salary} />
+        <p className="text-xs text-gray-400">Work-related deductions on personal (non-business) expenses.</p>
+        <DeductionTable items={salary.items} />
+      </div>
+
+      <hr className="border-gray-100" />
+
+      {/* Business section */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-gray-700">Business Income</h3>
+        <SectionSummary label="Business" section={business} />
+        <p className="text-xs text-gray-400">Deductible business expenses against sales revenue.</p>
+        <DeductionTable items={business.items} />
+      </div>
+
+      <hr className="border-gray-100" />
+
+      {/* Combined */}
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
+        <h3 className="font-semibold text-gray-700">Combined Tax Estimate</h3>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-center">
+          <div>
+            <p className="text-xs text-gray-400">Total Income</p>
+            <p className="text-xl font-bold text-green-600">{fmt(combined.total_income)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Total Deductible</p>
+            <p className="text-xl font-bold text-blue-600">{fmt(combined.total_deductible)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Taxable Income</p>
+            <p className="text-xl font-bold text-gray-800">{fmt(combined.taxable_income)}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-400">Est. Tax Payable</p>
+            <p className="text-xl font-bold text-red-500">{fmt(combined.estimated_tax)}</p>
+          </div>
+        </div>
+        <p className="text-xs text-gray-400">{combined.tax_brackets}</p>
+      </div>
+
+      <p className="text-xs text-gray-400">{result.note}</p>
     </div>
   );
 }

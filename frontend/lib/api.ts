@@ -27,6 +27,7 @@ export interface Transaction {
   needs_review?: boolean;
   category_confidence?: number;
   business?: boolean;
+  tax_kind?: string;
   source_ref?: string;
   created_at: string;
 }
@@ -42,6 +43,10 @@ export interface Summary {
   business_net: number;
   by_category_business: { category: string; total: number }[];
   by_category_business_income: { category: string; total: number }[];
+  employment_income: number;
+  employment_expenses: number;
+  by_category_employment: { category: string; total: number }[];
+  by_category_employment_income: { category: string; total: number }[];
   personal_expenses: number;
   personal_income: number;
   by_category_personal: { category: string; total: number }[];
@@ -51,7 +56,7 @@ export interface Summary {
 export const api = {
   getSummary: () => req<Summary>("/transactions/summary"),
 
-  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; source_ref?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; business?: boolean; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
+  getTransactions: (params?: { type?: string; category?: string; month?: string; date_from?: string; date_to?: string; source?: string; source_ref?: string; vendor?: string; needs_review?: boolean; anomaly?: boolean; business?: boolean; tax_kind?: string; sort_by?: string; sort_dir?: string; limit?: number; offset?: number }) => {
     const defined = Object.fromEntries(
       Object.entries(params ?? {}).filter(([, v]) => v !== undefined)
     );
@@ -224,6 +229,8 @@ export const api = {
     req<DeductionRule[]>(`/deductions/rules/reset?user_type=${user_type}`, { method: "POST" }),
   getDeductionsEstimate: (year: number) =>
     req<DeductionsEstimate>(`/deductions/estimate?year=${year}`),
+  getAITaxEstimate: (year: number, forceRefresh = false) =>
+    req<AITaxEstimate>(`/deductions/ai-estimate?year=${year}${forceRefresh ? "&force_refresh=true" : ""}`),
 
   // ── BAS ─────────────────────────────────────────────────────────────────
 
@@ -276,14 +283,57 @@ export interface DeductionItem {
   note?: string;
 }
 
+export interface DeductionSection {
+  items: DeductionItem[];
+  total_deductible: number;
+  total_expenses: number;
+}
+
 export interface DeductionsEstimate {
   year: number;
   period: string;
   date_range: string;
   user_type: string;
-  items: DeductionItem[];
+  business: DeductionSection;
+  employment: DeductionSection;
   total_deductible: number;
   total_expenses: number;
+  items: DeductionItem[];
+}
+
+export interface AITaxItem {
+  category: string;
+  total_spent: number;
+  deductible_rate: number;
+  deductible_amount: number;
+  reasoning: string;
+  ato_reference: string;
+  ato_urls: string[];
+  transaction_count: number;
+}
+
+export interface AITaxSection {
+  income: number;
+  total_expenses: number;
+  total_deductible: number;
+  taxable_income: number;
+  items: AITaxItem[];
+}
+
+export interface AITaxEstimate {
+  tax_year: string;
+  period: string;
+  salary: AITaxSection;
+  business: AITaxSection;
+  combined: {
+    total_income: number;
+    total_deductible: number;
+    taxable_income: number;
+    estimated_tax: number;
+    tax_brackets: string;
+  };
+  note: string;
+  error?: string;
 }
 
 export interface BasResult {

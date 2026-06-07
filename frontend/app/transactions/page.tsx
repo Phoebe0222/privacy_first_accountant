@@ -46,7 +46,7 @@ export default function TransactionsPage() {
   const [customTo, setCustomTo] = useState("");
   const [source, setSource] = useState("bank_csv");
   const [vendor, setVendor] = useState("");
-  const [businessOnly, setBusinessOnly] = useState(false);
+  const [taxKind, setTaxKind] = useState("");
   const [matchMap, setMatchMap] = useState<Record<number, ReconciliationMatch>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ vendor: "", category: "other", amount: "", tax: "", type: "expense" as "income" | "expense" | "transfer" | "transfer-in" | "transfer-out", description: "" });
@@ -59,7 +59,7 @@ export default function TransactionsPage() {
     const date_from = dateRange === "custom" ? customFrom || undefined : fy?.from;
     const date_to = dateRange === "custom" ? customTo || undefined : fy?.to;
     Promise.all([
-      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, source_ref: sourceRef || undefined, vendor: vendor || undefined, business: businessOnly || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
+      api.getTransactions({ type: type || undefined, category: category === "all" ? undefined : category, date_from, date_to, source: source || undefined, source_ref: sourceRef || undefined, vendor: vendor || undefined, tax_kind: taxKind || undefined, sort_by: col, sort_dir: dir, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE }),
       api.getReconciliationMatches(),
     ]).then(([{ items, total }, matches]) => {
       setItems(items);
@@ -77,7 +77,7 @@ export default function TransactionsPage() {
       setImportFiles(h.filter((f) => f.source === "bank_csv").map((f) => f.source_ref))
     ).catch(() => {});
   }, []);
-  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor, sourceRef, businessOnly]);
+  useEffect(() => { resetAndLoad(); }, [type, category, dateRange, customFrom, customTo, source, vendor, sourceRef, taxKind]);
   useEffect(() => { load(page); }, [page]);
   useEffect(() => { setPage(1); load(1, sortCol, sortDir); }, [sortCol, sortDir]);
 
@@ -248,15 +248,13 @@ export default function TransactionsPage() {
             {importFiles.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
         )}
-        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={businessOnly}
-            onChange={(e) => setBusinessOnly(e.target.checked)}
-            className="rounded"
-          />
-          Business only
-        </label>
+        <select value={taxKind} onChange={(e) => setTaxKind(e.target.value)}
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+          <option value="">All</option>
+          <option value="business">Business</option>
+          <option value="employment">Employment</option>
+          <option value="na">N/A</option>
+        </select>
       </div>}
 
       {pageTab === "transactions" && loading ? (
@@ -415,17 +413,19 @@ export default function TransactionsPage() {
 
                     <td className="px-4 py-3 text-center">
                       {(t.source === "bank_csv" || t.source === "manual") ? (
-                        <button
-                          onClick={() => api.updateTransaction(t.id, { business: !(t.business ?? false) }).then((updated) => setItems((prev) => prev.map((x) => x.id === t.id ? updated : x)))}
-                          title={(t.business ?? false) ? "Click to mark as personal" : "Click to mark as business"}
-                          className={`text-xs font-medium px-2 py-0.5 rounded transition-colors ${
-                            (t.business ?? false)
-                              ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                              : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        <select
+                          value={t.tax_kind ?? "personal"}
+                          onChange={(e) => api.updateTransaction(t.id, { tax_kind: e.target.value, business: e.target.value === "business" }).then((updated) => setItems((prev) => prev.map((x) => x.id === t.id ? updated : x)))}
+                          className={`text-xs font-medium px-2 py-0.5 rounded border-0 cursor-pointer transition-colors ${
+                            t.tax_kind === "business" ? "bg-blue-100 text-blue-700" :
+                            t.tax_kind === "na"       ? "bg-gray-100 text-gray-400" :
+                                                        "bg-gray-100 text-gray-500"
                           }`}
                         >
-                          {(t.business ?? false) ? "Business" : "Personal"}
-                        </button>
+                          <option value="na">N/A</option>
+                          <option value="employment">Employment</option>
+                          <option value="business">Business</option>
+                        </select>
                       ) : (
                         <span className="text-xs text-gray-300 italic">Receipt</span>
                       )}

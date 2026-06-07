@@ -112,6 +112,7 @@ def _build_transaction(
         needs_review=bool(data.get("needs_review", False)),
         category_confidence=data.get("category_confidence"),
         business=bool(data.get("business", False)),
+        tax_kind=data.get("tax_kind", "na"),
     )
 
 

@@ -51,7 +51,7 @@ class CategorizationState(BaseModel):
     needs_review: bool = True
     method: str = "fallback"
     history_summary: str = ""
-    business: bool = False
+    tax_kind: str = "na"
 
 
 # ── Structured output schema ──────────────────────────────────────────────────
@@ -60,12 +60,12 @@ class LLMCategorizationResult(BaseModel):
     category: str = Field(description="Transaction category from the allowed list")
     confidence: float = Field(description="Confidence score 0.0 to 1.0", ge=0.0, le=1.0)
     reasoning: str = Field(description="One sentence explaining the choice")
-    business: bool = Field(
+    tax_kind: str = Field(
         description=(
-            "True if this is clearly a business expense/income "
-            "(professional tools, business software, office supplies, staff costs). "
-            "False if personal (personal groceries, personal entertainment, personal gym, personal shopping, personal travel, personal meals). "
-            "When unclear, default to False."
+            "Classification of this transaction — must be one of:\n"
+            "'business' — business expense/income: professional tools, SaaS, office supplies, marketing, staff costs.\n"
+            "'employment' — work-related expense for a PAYG salary earner: home office costs, work tools, work-related phone/internet, work travel, self-education for current job.\n"
+            "'na' — personal or not applicable: groceries, personal entertainment, personal gym, personal shopping, personal meals, personal travel. Default when unclear."
         )
     )
 
@@ -169,9 +169,10 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "Step 1 — Read the description carefully. If the vendor is generic (e.g. PayPal, bank), "
         "use the description to identify the real merchant or purpose.\n"
         "Step 2 — Which category fits best?\n"
-        "Step 3 — Is this business or personal? "
-        "business=true: professional tools, SaaS, office supplies, wages, materials, marketing. "
-        "business=false: personal groceries, personal entertainment, gym, personal shopping, personal travel, personal meals, personal drinks. Default false.\n"
+        "Step 3 — What is the tax_kind?\n"
+        "  'business': professional tools, SaaS, marketing, office supplies, wages, materials.\n"
+        "  'employment': work-related for a salary earner (home office, work tools, work phone/internet, work travel).\n"
+        "  'na': personal (groceries, entertainment, gym, personal shopping, meals, drinks). Default.\n"
         "Step 4 — How confident are you in the category? (0.0–1.0)\n\n"
         "Amount hint: if the amount is under $15 and the vendor is a coffee shop, "
         "bubble tea, or café — use 'drink', not 'food'. "
@@ -208,12 +209,13 @@ async def _llm_categorize(state: CategorizationState) -> CategorizationState:
             "LLM categorize | %s → %s (%.0f%%) needs_review=%s | %s",
             state.vendor, category, confidence * 100, needs_review, result.reasoning,
         )
+        tax_kind = result.tax_kind if result.tax_kind in ("business", "employment", "na") else "na"
         return state.model_copy(update={
             "category": category,
             "confidence": confidence,
             "needs_review": needs_review,
             "method": "llm",
-            "business": result.business,
+            "tax_kind": tax_kind,
         })
     except Exception as e:
         log.warning("LLM categorize failed for '%s': %s", state.vendor, e)
@@ -254,7 +256,7 @@ async def categorize_transaction(
       confidence    float — 0.0–1.0 (1.0 for rule/history hits)
       needs_review  bool  — True when confidence < CONFIDENCE_THRESHOLD
       method        str   — "rules" | "history" | "llm" | "fallback"
-      business      bool  — True if the LLM determined this is a business transaction
+      tax_kind      str   — "business" | "employment" | "na"
     """
     state = CategorizationState(
         vendor=(vendor or "").strip(),
@@ -269,5 +271,6 @@ async def categorize_transaction(
         "confidence": final.confidence,
         "needs_review": final.needs_review,
         "method": final.method,
-        "business": final.business,
+        "tax_kind": final.tax_kind,
+        "business": final.tax_kind == "business",
     }

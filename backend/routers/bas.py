@@ -56,7 +56,7 @@ def get_bas(year: int, quarter: str = "annual", db: Session = Depends(get_db)):
         db.query(Transaction)
         .filter(
             Transaction.source.in_(_PRIMARY_SOURCES),
-            Transaction.business == True,  # noqa: E712
+            Transaction.tax_kind == "business",
             Transaction.date >= date_from,
             Transaction.date <= date_to,
         )

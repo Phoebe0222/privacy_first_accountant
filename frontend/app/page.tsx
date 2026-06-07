@@ -22,6 +22,7 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [error, setError] = useState("");
   const [bizTab, setBizTab] = useState<"expenses" | "income">("expenses");
+  const [empTab, setEmpTab] = useState<"expenses" | "income">("expenses");
   const [personalTab, setPersonalTab] = useState<"expenses" | "income">("expenses");
 
   useEffect(() => {
@@ -66,85 +67,95 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-3 gap-6">
         {/* Business */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
-          <h3 className="font-semibold text-gray-700">Business</h3>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="text-xs text-gray-400">Revenue</p>
-              <p className="text-lg font-bold text-green-600">{fmt(summary.business_income)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400">Costs</p>
-              <p className="text-lg font-bold text-red-500">{fmt(summary.business_expenses)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400">Net</p>
-              <p className={`text-lg font-bold ${summary.business_net >= 0 ? "text-blue-600" : "text-red-600"}`}>
-                {fmt(summary.business_net)}
-              </p>
-            </div>
-          </div>
-          <div className="flex gap-2 pt-1">
-            <button onClick={() => setBizTab("expenses")} className={`text-xs px-3 py-1 rounded-full border transition-colors ${bizTab === "expenses" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200 hover:border-gray-400"}`}>Costs</button>
-            <button onClick={() => setBizTab("income")} className={`text-xs px-3 py-1 rounded-full border transition-colors ${bizTab === "income" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200 hover:border-gray-400"}`}>Income</button>
-          </div>
-          {(() => {
-            const rows = bizTab === "expenses" ? summary.by_category_business : summary.by_category_business_income;
-            return rows.length > 0 ? (
-              <div className="space-y-1.5 pt-2 border-t border-gray-50">
-                {[...rows].sort((a, b) => b.total - a.total).map((c) => (
-                  <div key={c.category} className="flex justify-between text-sm">
-                    <span className="capitalize text-gray-500">{c.category.replace("_", " ")}</span>
-                    <span className="font-medium text-gray-700">{fmt(c.total)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 pt-2 border-t border-gray-50">
-                {bizTab === "expenses" ? "No business expenses yet." : "No business income yet."}
-              </p>
-            );
-          })()}
-        </div>
+        <SummaryBoard title="Business"
+          stats={[
+            { label: "Revenue", value: fmt(summary.business_income), color: "text-green-600" },
+            { label: "Costs",   value: fmt(summary.business_expenses), color: "text-red-500" },
+            { label: "Net",     value: fmt(summary.business_net), color: summary.business_net >= 0 ? "text-blue-600" : "text-red-600" },
+          ]}
+          tab={bizTab} onTab={setBizTab}
+          expenseRows={summary.by_category_business}
+          incomeRows={summary.by_category_business_income}
+          emptyExpense="No business expenses yet — mark transactions as Business in Transactions."
+          emptyIncome="No business income yet."
+        />
+
+        {/* Employment */}
+        <SummaryBoard title="Employment"
+          stats={[
+            { label: "Salary", value: fmt(summary.employment_income), color: "text-green-600" },
+            { label: "Costs",  value: fmt(summary.employment_expenses), color: "text-red-500" },
+          ]}
+          tab={empTab} onTab={setEmpTab}
+          expenseRows={summary.by_category_employment}
+          incomeRows={summary.by_category_employment_income}
+          emptyExpense="No employment expenses yet."
+          emptyIncome="No employment income yet."
+        />
 
         {/* Personal */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
-          <h3 className="font-semibold text-gray-700">Personal</h3>
-          <div className="grid grid-cols-2 gap-3 text-center">
-            <div>
-              <p className="text-xs text-gray-400">Spending</p>
-              <p className="text-lg font-bold text-red-500">{fmt(summary.personal_expenses)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400">Income</p>
-              <p className="text-lg font-bold text-green-600">{fmt(summary.personal_income)}</p>
-            </div>
-          </div>
-          <div className="flex gap-2 pt-1">
-            <button onClick={() => setPersonalTab("expenses")} className={`text-xs px-3 py-1 rounded-full border transition-colors ${personalTab === "expenses" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200 hover:border-gray-400"}`}>Costs</button>
-            <button onClick={() => setPersonalTab("income")} className={`text-xs px-3 py-1 rounded-full border transition-colors ${personalTab === "income" ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200 hover:border-gray-400"}`}>Income</button>
-          </div>
-          {(() => {
-            const rows = personalTab === "expenses" ? summary.by_category_personal : summary.by_category_personal_income;
-            return rows.length > 0 ? (
-              <div className="space-y-1.5 pt-2 border-t border-gray-50">
-                {[...rows].sort((a, b) => b.total - a.total).map((c) => (
-                  <div key={c.category} className="flex justify-between text-sm">
-                    <span className="capitalize text-gray-500">{c.category.replace("_", " ")}</span>
-                    <span className="font-medium text-gray-700">{fmt(c.total)}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-gray-400 pt-2 border-t border-gray-50">
-                {personalTab === "expenses" ? "No personal expenses yet." : "No personal income yet."}
-              </p>
-            );
-          })()}
-        </div>
+        <SummaryBoard title="Personal"
+          stats={[
+            { label: "Spending", value: fmt(summary.personal_expenses), color: "text-red-500" },
+            { label: "Income",   value: fmt(summary.personal_income), color: "text-green-600" },
+          ]}
+          tab={personalTab} onTab={setPersonalTab}
+          expenseRows={summary.by_category_personal}
+          incomeRows={summary.by_category_personal_income}
+          emptyExpense="No personal expenses yet."
+          emptyIncome="No personal income yet."
+        />
       </div>
+    </div>
+  );
+}
+
+function SummaryBoard({ title, stats, tab, onTab, expenseRows, incomeRows, emptyExpense, emptyIncome }: {
+  title: string;
+  stats: { label: string; value: string; color: string }[];
+  tab: "expenses" | "income";
+  onTab: (t: "expenses" | "income") => void;
+  expenseRows: { category: string; total: number }[];
+  incomeRows: { category: string; total: number }[];
+  emptyExpense: string;
+  emptyIncome: string;
+}) {
+  const rows = tab === "expenses" ? expenseRows : incomeRows;
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-4">
+      <h3 className="font-semibold text-gray-700">{title}</h3>
+      <div className={`grid grid-cols-${stats.length} gap-3 text-center`}>
+        {stats.map((s) => (
+          <div key={s.label}>
+            <p className="text-xs text-gray-400">{s.label}</p>
+            <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2 pt-1">
+        {(["expenses", "income"] as const).map((t) => (
+          <button key={t} onClick={() => onTab(t)}
+            className={`text-xs px-3 py-1 rounded-full border transition-colors ${tab === t ? "bg-gray-800 text-white border-gray-800" : "text-gray-500 border-gray-200 hover:border-gray-400"}`}>
+            {t === "expenses" ? "Costs" : "Income"}
+          </button>
+        ))}
+      </div>
+      {rows.length > 0 ? (
+        <div className="space-y-1.5 pt-2 border-t border-gray-50">
+          {[...rows].sort((a, b) => b.total - a.total).map((c) => (
+            <div key={c.category} className="flex justify-between text-sm">
+              <span className="capitalize text-gray-500">{c.category.replace("_", " ")}</span>
+              <span className="font-medium text-gray-700">{fmt(c.total)}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 pt-2 border-t border-gray-50">
+          {tab === "expenses" ? emptyExpense : emptyIncome}
+        </p>
+      )}
     </div>
   );
 }

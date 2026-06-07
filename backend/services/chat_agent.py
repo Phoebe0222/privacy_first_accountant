@@ -158,18 +158,45 @@ def get_financial_summary(
         db.close()
 
 
+@tool
+async def query_tax_rules(question: str, year: str = "2025-2026") -> str:
+    """
+    Search Australian ATO tax rules to answer questions about deductibility.
+    Use this when the user asks whether something is tax deductible, what records
+    they need to keep, or how a deduction works under Australian tax law.
+    question: a plain-English question, e.g. "Is home office rent deductible?"
+    year: tax year, default 2025-2026.
+    Returns relevant ATO guidance with source URLs.
+    """
+    from backend.services import rag
+    results = await rag.search_ato_rules(question, year=year)
+    if not results:
+        return "No ATO rules indexed yet. Run the ato-init container first."
+    lines = []
+    seen_urls: set[str] = set()
+    for r in results:
+        lines.append(r["text"])
+        if r["url"] and r["url"] not in seen_urls:
+            lines.append(f"Source: {r['url']}")
+            seen_urls.add(r["url"])
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
-_TOOLS = [search_transactions, update_transaction, get_financial_summary]
+_TOOLS = [search_transactions, update_transaction, get_financial_summary, query_tax_rules]
 _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
 
 _SYSTEM = (
     "You are a private business accountant assistant for an Australian small business. "
-    "You have tools to query and update the transaction database.\n\n"
+    "You have tools to query and update the transaction database, and to look up ATO tax rules.\n\n"
     "Guidelines:\n"
     "- To answer questions about transactions, call search_transactions or get_financial_summary.\n"
+    "- To answer questions about tax deductibility or ATO rules, call query_tax_rules.\n"
     "- To change a transaction, first search to confirm it exists, then call update_transaction.\n"
-    "- Always confirm what was changed or found. Be concise. Format amounts as $X.XX AUD."
+    "- Always confirm what was changed or found. Be concise. Format amounts as $X.XX AUD.\n"
+    "- When citing ATO rules, include the source URL."
 )
 
 
@@ -202,7 +229,7 @@ async def chat(messages: list[dict], system_context: str = "") -> str:
                 result = f"Unknown tool: {tc['name']}"
             else:
                 try:
-                    result = tool_fn.invoke(tc["args"])
+                    result = await tool_fn.ainvoke(tc["args"])
                 except Exception as e:
                     result = f"Tool error: {e}"
             log.info("CHAT TOOL | %s(%s) → %s", tc["name"], tc["args"], str(result)[:200])

@@ -172,6 +172,9 @@ export default function ReceiptsPage() {
                       <td className="px-4 py-3 text-gray-600">{t.date}</td>
                       <td className="px-4 py-3 font-medium text-gray-800">{t.vendor}</td>
                       <td className="px-4 py-3 text-gray-500 capitalize">{t.category}</td>
+                      <td className={`px-4 py-3 font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
+                        {fmt(t.amount)}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`text-xs font-medium px-2 py-0.5 rounded ${t.type === "income" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
                           {t.type}
@@ -180,13 +183,10 @@ export default function ReceiptsPage() {
                       <td className="px-4 py-3 text-gray-400 text-xs">{SOURCE_LABELS[t.source] ?? t.source}</td>
                       <td className="px-4 py-3 text-xs max-w-[140px]">
                         {m ? (
-                          <span className={m.status === "confirmed" ? "text-green-600 font-medium truncate block" : "text-amber-500 truncate block"} title={m.bank?.vendor ?? ""}>
-                            {m.status === "confirmed" ? "✓" : "~"} {m.bank?.vendor ?? "—"}
+                          <span className={m.status === "confirmed" ? "text-green-600 font-medium truncate block" : "text-amber-500 truncate block"} title={m.bank?.description ?? m.bank?.vendor ?? ""}>
+                            {m.status === "confirmed" ? "✓" : "~"} {m.bank?.description ?? m.bank?.vendor ?? "—"}
                           </span>
                         ) : <span className="text-gray-300">—</span>}
-                      </td>
-                      <td className={`px-4 py-3 text-right font-medium ${t.type === "income" ? "text-green-600" : "text-gray-800"}`}>
-                        {fmt(t.amount)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button

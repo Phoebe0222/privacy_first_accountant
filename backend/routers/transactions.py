@@ -28,6 +28,7 @@ def list_transactions(
     anomaly: Optional[bool] = None,
     source_ref: Optional[str] = None,
     business: Optional[bool] = None,
+    tax_kind: Optional[str] = None,
     sort_by: str = "date",
     sort_dir: str = "desc",
     limit: int = 200,
@@ -56,7 +57,12 @@ def list_transactions(
     if source_ref:
         q = q.filter(Transaction.source_ref == source_ref)
     if business is not None:
-        q = q.filter(Transaction.business == business)  # noqa: E712
+        if business:
+            q = q.filter(Transaction.tax_kind == "business")
+        else:
+            q = q.filter(Transaction.tax_kind != "business")
+    if tax_kind:
+        q = q.filter(Transaction.tax_kind == tax_kind)
     total = q.count()
     col = getattr(Transaction, sort_by if sort_by in SORTABLE_COLUMNS else "date")
     order = desc(col) if sort_dir == "desc" else asc(col)
@@ -220,8 +226,9 @@ def list_imports(db: Session = Depends(get_db)):
 def summary(db: Session = Depends(get_db)):
     # Only bank_csv transactions — no double-counting with receipts
     bank = Transaction.source == "bank_csv"
-    biz = Transaction.business == True   # noqa: E712
-    personal = Transaction.business == False  # noqa: E712
+    biz  = Transaction.tax_kind == "business"
+    emp  = Transaction.tax_kind == "employment"
+    per  = Transaction.tax_kind == "na"
 
     def _sum(extra_filters):
         return db.query(func.sum(Transaction.amount)).filter(bank, *extra_filters).scalar() or 0
@@ -235,10 +242,12 @@ def summary(db: Session = Depends(get_db)):
         )
         return [{"category": c, "total": round(t, 2)} for c, t in rows]
 
-    biz_income = _sum([biz, Transaction.type == "income"])
+    biz_income  = _sum([biz, Transaction.type == "income"])
     biz_expenses = _sum([biz, Transaction.type == "expense"])
-    personal_expenses = _sum([personal, Transaction.type == "expense"])
-    personal_income = _sum([personal, Transaction.type == "income"])
+    emp_income  = _sum([emp, Transaction.type == "income"])
+    emp_expenses = _sum([emp, Transaction.type == "expense"])
+    per_income  = _sum([per, Transaction.type == "income"])
+    per_expenses = _sum([per, Transaction.type == "expense"])
 
     monthly = (
         db.query(
@@ -259,17 +268,22 @@ def summary(db: Session = Depends(get_db)):
         "net_profit": round(biz_income - biz_expenses, 2),
         "monthly": [{"month": m, "type": tp, "total": round(tot, 2)} for m, tp, tot in monthly],
         "by_category": _by_cat([biz, Transaction.type == "expense"]),
-        # Business breakdown
+        # Business
         "business_income": round(biz_income, 2),
         "business_expenses": round(biz_expenses, 2),
         "business_net": round(biz_income - biz_expenses, 2),
         "by_category_business": _by_cat([biz, Transaction.type == "expense"]),
         "by_category_business_income": _by_cat([biz, Transaction.type == "income"]),
-        # Personal breakdown
-        "personal_expenses": round(personal_expenses, 2),
-        "personal_income": round(personal_income, 2),
-        "by_category_personal": _by_cat([personal, Transaction.type == "expense"]),
-        "by_category_personal_income": _by_cat([personal, Transaction.type == "income"]),
+        # Employment
+        "employment_income": round(emp_income, 2),
+        "employment_expenses": round(emp_expenses, 2),
+        "by_category_employment": _by_cat([emp, Transaction.type == "expense"]),
+        "by_category_employment_income": _by_cat([emp, Transaction.type == "income"]),
+        # Personal (na)
+        "personal_expenses": round(per_expenses, 2),
+        "personal_income": round(per_income, 2),
+        "by_category_personal": _by_cat([per, Transaction.type == "expense"]),
+        "by_category_personal_income": _by_cat([per, Transaction.type == "income"]),
     }
 
 
@@ -290,6 +304,7 @@ def _serialize(t: Transaction) -> dict:
         "needs_review": t.needs_review or False,
         "category_confidence": t.category_confidence,
         "business": t.business if t.business is not None else False,
+        "tax_kind": t.tax_kind or "na",
         "source_ref": t.source_ref,
         "created_at": t.created_at.isoformat() if t.created_at else None,
     }

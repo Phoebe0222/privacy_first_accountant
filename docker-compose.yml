@@ -34,6 +34,21 @@ services:
     command: ["ollama pull llama3.2:3b && ollama pull qwen2.5:7b && ollama pull nomic-embed-text"]
     restart: "no"
 
+  ato-init:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    volumes:
+      - ./data:/app/data
+    environment:
+      - CHROMA_PATH=/app/data/chroma_db
+      - OLLAMA_BASE=http://ollama:11434
+    command: ["python", "-m", "backend.services.ato_fetcher", "--year", "2025-2026"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   backend:
     build:
       context: .

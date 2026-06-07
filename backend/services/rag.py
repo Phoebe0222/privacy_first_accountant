@@ -80,3 +80,26 @@ async def reindex_all(transactions: list) -> int:
 
 def indexed_count() -> int:
     return _col.count()
+
+
+_ato_col = _client.get_or_create_collection(
+    "ato_rules",
+    metadata={"hnsw:space": "cosine"},
+)
+
+
+async def search_ato_rules(query: str, year: str = "2025-2026", n_results: int = 5) -> list[dict]:
+    """Search the ATO rules collection. Returns list of {text, category, url}."""
+    if _ato_col.count() == 0:
+        return []
+    embedding = await _embed(query)
+    where = {"year": year} if year else None
+    results = _ato_col.query(
+        query_embeddings=[embedding],
+        n_results=min(n_results, _ato_col.count()),
+        where=where,
+    )
+    out = []
+    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+        out.append({"text": doc, "category": meta.get("category", ""), "url": meta.get("url", "")})
+    return out

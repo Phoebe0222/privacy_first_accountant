@@ -57,7 +57,7 @@ _DEDUCTION_SEEDS = {
 
 
 def init_db():
-    from backend.models import Transaction, EmailAccount, ChatMessage, VendorRule, ATORule, Attachment, ReconciliationMatch, DeductionRule, AppSettings  # noqa: F401
+    from backend.models import Transaction, EmailAccount, ChatMessage, VendorRule, ATORule, Attachment, ReconciliationMatch, DeductionRule, AppSettings, AITaxCache  # noqa: F401
     Base.metadata.create_all(bind=engine)
     # Add new columns to existing tables without dropping data
     with engine.connect() as conn:
@@ -67,6 +67,7 @@ def init_db():
             ("needs_review", "BOOLEAN DEFAULT 0"),
             ("category_confidence", "REAL"),
             ("business", "BOOLEAN DEFAULT 0"),
+            ("tax_kind", "VARCHAR DEFAULT 'na'"),
         ]:
             try:
                 conn.execute(__import__("sqlalchemy").text(
@@ -75,6 +76,15 @@ def init_db():
                 conn.commit()
             except Exception:
                 pass  # Column already exists
+
+        # Backfill tax_kind from existing business flag; collapse personal → na
+        try:
+            _text = __import__("sqlalchemy").text
+            conn.execute(_text("UPDATE transactions SET tax_kind = 'business' WHERE business = 1 AND (tax_kind IS NULL OR tax_kind != 'business')"))
+            conn.execute(_text("UPDATE transactions SET tax_kind = 'na' WHERE (tax_kind IS NULL OR tax_kind = 'personal')"))
+            conn.commit()
+        except Exception:
+            pass
 
     # Add built_in column to vendor_rules if missing
     with engine.connect() as conn:
