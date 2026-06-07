@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, DeductionRule, DeductionItem, DeductionSection, DeductionsEstimate, AITaxEstimate, AITaxItem, AITaxSection } from "@/lib/api";
+import { api, DeductionRule, DeductionSection, DeductionsEstimate, AITaxEstimate, AITaxItem, AITaxSection } from "@/lib/api";
 
 type ATORule = { id: number; title: string; description: string };
 
@@ -379,7 +379,7 @@ function RulesTab({ userType, rules, onRulesChange }: { userType: string; rules:
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-400">Deduction rates for <strong>{USER_TYPES.find((u) => u.value === userType)?.label}</strong>. Edit rates or add custom categories.</p>
+        <p className="text-sm text-gray-400">Deduction rates for <strong className="capitalize">{userType.replace(/_/g, " ")}</strong>. Edit rates or add custom categories.</p>
         <div className="flex gap-2">
           <button onClick={reset} className="text-xs text-gray-400 hover:text-red-500 underline">Reset to defaults</button>
           <button onClick={() => setShowAdd(true)} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">+ Add Rule</button>
@@ -477,7 +477,7 @@ function ATOContextTab() {
   function load() { api.getATORules().then(setRules).catch(() => {}); }
   useEffect(() => { load(); }, []);
 
-  async function handleAdd(e: React.FormEvent) {
+  async function handleAdd(e: React.SyntheticEvent) {
     e.preventDefault();
     setError("");
     try {
