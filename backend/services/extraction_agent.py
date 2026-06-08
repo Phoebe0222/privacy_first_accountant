@@ -378,6 +378,40 @@ async def extract_from_text(text: str) -> dict:
     }
 
 
+class _PayslipExtraction(BaseModel):
+    gross_salary_ytd:  float = Field(description="Year-to-date gross salary/earnings before tax")
+    payg_withheld_ytd: float = Field(description="Year-to-date PAYG/income tax withheld")
+    employer:          Optional[str] = Field(default=None, description="Employer or company name")
+    pay_period_end:    Optional[str] = Field(default=None, description="Pay period end date YYYY-MM-DD")
+
+
+_PAYSLIP_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", """\
+You are an Australian payslip parser. Extract YTD (year-to-date) totals.
+
+gross_salary_ytd: Total year-to-date gross earnings before tax.
+  Look for: "YTD Gross", "Total Gross YTD", "Gross Earnings YTD", "YTD Total Gross Pay".
+payg_withheld_ytd: Total year-to-date PAYG/income tax withheld.
+  Look for: "YTD Tax", "PAYG Withholding YTD", "Tax Withheld YTD", "Income Tax YTD", "PAYG YTD".
+employer: The company or employer name.
+pay_period_end: Pay period end date as YYYY-MM-DD.
+
+Return ONLY the JSON object."""),
+    ("human", "Payslip:\n{text}"),
+])
+
+
+async def extract_payslip_fields(text: str) -> dict:
+    chain = _PAYSLIP_PROMPT | get_llm(model=EXTRACT_MODEL).with_structured_output(_PayslipExtraction)
+    result: _PayslipExtraction = await chain.ainvoke({"text": text[:4000]})
+    return {
+        "gross_salary_ytd":  max(0.0, result.gross_salary_ytd),
+        "payg_withheld_ytd": max(0.0, result.payg_withheld_ytd),
+        "employer":          result.employer,
+        "pay_period_end":    result.pay_period_end,
+    }
+
+
 async def extract_from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
     """OCR an image with the vision model. Returns raw text, or empty string on failure."""
     import base64

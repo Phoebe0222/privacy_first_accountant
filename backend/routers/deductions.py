@@ -11,6 +11,26 @@ router = APIRouter(prefix="/deductions", tags=["deductions"])
 _PRIMARY_SOURCES = ("bank_csv", "manual")
 VALID_USER_TYPES = ("individual_salary", "individual_abn", "small_business")
 
+_TAX_BRACKETS = [
+    (18_200,       0.00, 0),
+    (45_000,       0.16, 18_200),
+    (135_000,      0.30, 45_000),
+    (190_000,      0.37, 135_000),
+    (float("inf"), 0.45, 190_000),
+]
+
+
+def _calc_tax(taxable_income: float) -> float:
+    if taxable_income <= 0:
+        return 0.0
+    tax = 0.0
+    for threshold, rate, base in _TAX_BRACKETS:
+        if taxable_income <= threshold:
+            tax += (taxable_income - base) * rate
+            break
+    lito = max(0.0, 700.0 - max(0.0, taxable_income - 37_500) * 0.05)
+    return max(0.0, round(tax - lito + taxable_income * 0.02, 2))
+
 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -110,7 +130,7 @@ def reset_rules(user_type: str, db: Session = Depends(get_db)):
 
 # ── Estimate ──────────────────────────────────────────────────────────────────
 
-def _calc_section(expenses: list, rules: dict) -> dict:
+def _calc_section(expenses: list, income: float, rules: dict) -> dict:
     by_cat: dict[str, float] = {}
     for t in expenses:
         cat = t.category or "other"
@@ -134,10 +154,13 @@ def _calc_section(expenses: list, rules: dict) -> dict:
             "note": note,
         })
 
+    total_deductible = round(total_deductible, 2)
     return {
+        "income": round(income, 2),
         "items": items,
-        "total_deductible": round(total_deductible, 2),
+        "total_deductible": total_deductible,
         "total_expenses": round(sum(by_cat.values()), 2),
+        "taxable_income": round(max(0.0, income - total_deductible), 2),
     }
 
 
@@ -157,32 +180,65 @@ def estimate(year: int, db: Session = Depends(get_db)):
     biz_rules = {r.category: r for r in db.query(DeductionRule).filter(DeductionRule.user_type == user_type).all()}
     emp_rules = {r.category: r for r in db.query(DeductionRule).filter(DeductionRule.user_type == "individual_salary").all()}
 
-    def _expenses(tax_kind: str):
-        return (
+    def _txs(tax_kind: str, tx_type: str, category: str | None = None):
+        q = (
             db.query(Transaction)
             .filter(
                 Transaction.source.in_(_PRIMARY_SOURCES),
                 Transaction.tax_kind == tax_kind,
-                Transaction.type == "expense",
+                Transaction.type == tx_type,
                 Transaction.date >= date_from,
                 Transaction.date <= date_to,
             )
-            .all()
         )
+        if category:
+            q = q.filter(Transaction.category == category)
+        return q.all()
 
-    business    = _calc_section(_expenses("business"),    biz_rules)
-    employment  = _calc_section(_expenses("employment"),  emp_rules)
+    gross_salary_row = db.get(AppSettings, "gross_salary")
+    gross_salary_setting = float(gross_salary_row.value) if gross_salary_row and gross_salary_row.value else 0.0
+
+    payg_withheld_row = db.get(AppSettings, "payg_withheld")
+    payg_withheld_setting = float(payg_withheld_row.value) if payg_withheld_row and payg_withheld_row.value else 0.0
+
+    biz_income  = sum(t.amount or 0 for t in _txs("business",    "income", "sales"))
+    tx_emp_income = sum(t.amount or 0 for t in _txs("employment", "income", "salary"))
+    emp_income  = gross_salary_setting if gross_salary_setting > 0 else tx_emp_income
+
+    business   = _calc_section(_txs("business",   "expense"), biz_income, biz_rules)
+    employment = _calc_section(_txs("employment", "expense"), emp_income, emp_rules)
+
+    biz_net    = round(biz_income - business["total_deductible"], 2)
+    biz_is_loss = biz_net < 0
+
+    if biz_is_loss:
+        combined_taxable = None
+        income_tax = _calc_tax(employment["taxable_income"])
+    else:
+        combined_taxable = max(0.0, round(employment["taxable_income"] + biz_net, 2))
+        income_tax = _calc_tax(combined_taxable)
 
     return {
         "year": year,
         "period": f"FY{year}–{str(year + 1)[2:]}",
         "date_range": f"{date_from} to {date_to}",
         "user_type": user_type,
+        "gross_salary_source": "settings" if gross_salary_setting > 0 else "transactions",
+        "payg_withheld": payg_withheld_setting,
         "business": business,
         "employment": employment,
+        "combined": {
+            "biz_is_loss": biz_is_loss,
+            "biz_net": biz_net,
+            "salary_taxable": employment["taxable_income"],
+            "taxable_income": combined_taxable,
+            "income_tax": income_tax,
+            "payg_withheld": payg_withheld_setting,
+            "tax_owing": round(max(0.0, income_tax - payg_withheld_setting), 2),
+            "tax_refund": round(max(0.0, payg_withheld_setting - income_tax), 2),
+        },
         "total_deductible": round(business["total_deductible"] + employment["total_deductible"], 2),
         "total_expenses": round(business["total_expenses"] + employment["total_expenses"], 2),
-        # keep flat items list for backwards compat (business section)
         "items": business["items"],
     }
 
@@ -202,7 +258,10 @@ async def ai_estimate(year: int, force_refresh: bool = False, db: Session = Depe
     if not force_refresh:
         cached = db.get(AITaxCache, year)
         if cached:
-            return json.loads(cached.result_json)
+            data = json.loads(cached.result_json)
+            # Invalidate cache if it's from an older format (missing biz_is_loss key)
+            if isinstance(data.get("combined"), dict) and "biz_is_loss" in data["combined"] and "payg_withheld" in data["combined"]:
+                return data
 
     result = await run_tax_estimate(year, db)
 

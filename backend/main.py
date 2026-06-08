@@ -15,6 +15,7 @@ from backend.routers.reconciliation import router as reconciliation_router
 from backend.routers.rag_router import router as rag_router
 from backend.routers.vendor_rules import router as vendor_rules_router
 from backend.routers.ato_rules import router as ato_rules_router
+from backend.routers.settings import router as settings_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,6 +44,7 @@ app.include_router(reconciliation_router)
 app.include_router(rag_router)
 app.include_router(vendor_rules_router)
 app.include_router(ato_rules_router)
+app.include_router(settings_router)
 
 
 @app.on_event("startup")

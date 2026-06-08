@@ -21,6 +21,7 @@ export default function DeductionsPage() {
   const [aiEstimate, setAiEstimate] = useState<AITaxEstimate | null>(null);
   const [rules, setRules] = useState<DeductionRule[]>([]);
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const fyOptions = Array.from({ length: 5 }, (_, i) => fyStartYear() - i);
 
@@ -32,14 +33,23 @@ export default function DeductionsPage() {
     if (tab === "estimate") {
       setLoading(true);
       api.getDeductionsEstimate(year).then(setEstimate).finally(() => setLoading(false));
-    } else if (tab === "ai") {
-      setLoading(true);
-      setAiEstimate(null);
-      api.getAITaxEstimate(year, false).then(setAiEstimate).finally(() => setLoading(false));
     } else if (tab === "rules") {
       api.getDeductionRules(userType).then(setRules);
     }
   }, [tab, year, userType]);
+
+  useEffect(() => {
+    setAiEstimate(null);
+    setAiLoading(false);
+  }, [year]);
+
+  function runAiEstimate(forceRefresh: boolean) {
+    setAiLoading(true);
+    if (forceRefresh) setAiEstimate(null);
+    api.getAITaxEstimate(year, forceRefresh)
+      .then(setAiEstimate)
+      .finally(() => setAiLoading(false));
+  }
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -63,24 +73,41 @@ export default function DeductionsPage() {
       </div>
 
       {tab === "estimate" && (loading ? <p className="text-gray-400">Calculating…</p> : estimate && <EstimateTab estimate={estimate} />)}
-      {tab === "ai" && (loading ? (
-        <div className="space-y-2">
-          <p className="text-gray-500">Analysing transactions with ATO rules…</p>
-          <p className="text-xs text-gray-400">This may take a minute — the AI is assessing each expense category.</p>
-        </div>
-      ) : aiEstimate && (
-        <div className="space-y-4">
-          <div className="flex justify-end">
+      {tab === "ai" && (
+        aiLoading ? (
+          <div className="flex flex-col items-center gap-4 py-16">
+            <svg className="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <div className="text-center space-y-1">
+              <p className="text-gray-600 font-medium">Analysing transactions with ATO rules…</p>
+              <p className="text-xs text-gray-400">This may take a minute — the AI is assessing each expense category.</p>
+            </div>
+          </div>
+        ) : aiEstimate ? (
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <button onClick={() => runAiEstimate(true)} className="text-xs text-gray-400 hover:text-gray-600 underline">
+                Re-run AI
+              </button>
+            </div>
+            <AIEstimateTab result={aiEstimate} />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-4 py-16 text-center">
+            <p className="text-sm text-gray-500 max-w-sm">
+              The AI tax agent uses ATO guidance to assess deductibility of each expense category and estimate tax payable.
+            </p>
             <button
-              onClick={() => { setLoading(true); setAiEstimate(null); api.getAITaxEstimate(year, true).then(setAiEstimate).finally(() => setLoading(false)); }}
-              className="text-xs text-gray-400 hover:text-gray-600 underline"
+              onClick={() => runAiEstimate(false)}
+              className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
             >
-              Refresh (rerun AI)
+              Run AI Estimate
             </button>
           </div>
-          <AIEstimateTab result={aiEstimate} />
-        </div>
-      ))}
+        )
+      )}
       {tab === "rules" && <RulesTab userType={userType} rules={rules} onRulesChange={setRules} />}
       {tab === "ato" && <ATOContextTab />}
     </div>
@@ -124,62 +151,143 @@ function SectionTable({ section, emptyMsg }: { section: DeductionSection; emptyM
   );
 }
 
-function EstimateTab({ estimate }: { estimate: DeductionsEstimate }) {
-  const [sectionTab, setSectionTab] = useState<"employment" | "business" | "combined">("employment");
+function EstimateSectionHeader({ label, section }: { label: string; section: DeductionSection }) {
+  return (
+    <div className="grid grid-cols-3 gap-3 text-center text-sm">
+      <div>
+        <p className="text-xs text-gray-400">{label} Income</p>
+        <p className="font-bold text-green-600">{fmt(section.income)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-400">Deductible</p>
+        <p className="font-bold text-blue-600">− {fmt(section.total_deductible)}</p>
+      </div>
+      <div>
+        <p className="text-xs text-gray-400">Taxable</p>
+        <p className="font-bold text-gray-800">{fmt(section.taxable_income)}</p>
+      </div>
+    </div>
+  );
+}
 
-  const deductibleByTab = {
-    employment: estimate.employment.total_deductible,
-    business:   estimate.business.total_deductible,
-    combined:   estimate.total_deductible,
-  };
+function TaxPosition({ combined, source }: { combined: DeductionsEstimate["combined"]; source: string }) {
+  const hasPAYG = combined.payg_withheld > 0;
+  return (
+    <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold text-gray-700">Tax Position</h3>
+        {source === "settings" && (
+          <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 rounded px-2 py-0.5">
+            Salary from Tax Settings
+          </span>
+        )}
+      </div>
+      <div className="space-y-1.5 text-sm">
+        <div className="flex justify-between">
+          <span className="text-gray-500">Taxable income</span>
+          <span className="font-medium">{fmt(combined.taxable_income ?? combined.salary_taxable)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-gray-500">Income tax liability</span>
+          <span className="font-medium text-red-500">− {fmt(combined.income_tax)}</span>
+        </div>
+        {hasPAYG ? (
+          <>
+            <div className="flex justify-between">
+              <span className="text-gray-500">PAYG withheld</span>
+              <span className="font-medium text-green-600">+ {fmt(combined.payg_withheld)}</span>
+            </div>
+            <div className="flex justify-between border-t border-gray-200 pt-1.5 mt-1">
+              {combined.tax_owing > 0 ? (
+                <>
+                  <span className="font-semibold text-gray-700">Est. tax to pay</span>
+                  <span className="font-bold text-red-500">{fmt(combined.tax_owing)}</span>
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-gray-700">Est. tax refund</span>
+                  <span className="font-bold text-green-600">{fmt(combined.tax_refund)}</span>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-gray-400 pt-1">
+            Enter PAYG withheld in{" "}
+            <a href="/tax-settings" className="text-blue-500 hover:underline">Tax Settings</a>{" "}
+            to see tax to pay / refund.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EstimateTab({ estimate }: { estimate: DeductionsEstimate }) {
+  const { combined } = estimate;
 
   return (
-    <div className="space-y-4">
-      {/* Section tabs */}
-      <div className="flex gap-2">
-        {(["employment", "business", "combined"] as const).map((t) => (
-          <button key={t} onClick={() => setSectionTab(t)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${sectionTab === t ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>
-            {t}
-          </button>
-        ))}
+    <div className="space-y-6">
+      <p className="text-xs text-gray-400">{estimate.period} · {estimate.date_range}</p>
+
+      {/* Employment */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-gray-700">Employment</h3>
+        <EstimateSectionHeader label="Salary" section={estimate.employment} />
+        <p className="text-xs text-gray-400">
+          {estimate.gross_salary_source === "settings"
+            ? "Salary from Tax Settings (YTD payslip figure). Work-related deductions applied."
+            : "Work-related deductions on employment transactions."}
+        </p>
+        <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions. Mark transactions as Employment in the Transactions page." />
       </div>
 
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-400">{estimate.period} · {estimate.date_range}</p>
-        <p className="text-sm font-medium text-green-600">{fmt(deductibleByTab[sectionTab])} deductible</p>
+      <hr className="border-gray-100" />
+
+      {/* Business */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-gray-700">Business</h3>
+        <EstimateSectionHeader label="Business" section={estimate.business} />
+        <p className="text-xs text-gray-400">Deductible business expenses against sales revenue.</p>
+        <SectionTable section={estimate.business} emptyMsg="No business expense transactions. Mark transactions as Business in the Transactions page." />
       </div>
 
-      {sectionTab === "employment" && (
-        <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions for this period. Mark transactions as Employment in the Transactions page." />
-      )}
+      <hr className="border-gray-100" />
 
-      {sectionTab === "business" && (
-        <SectionTable section={estimate.business} emptyMsg="No business expense transactions for this period. Mark transactions as Business in the Transactions page." />
-      )}
+      {/* Combined */}
+      <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
+        <h3 className="font-semibold text-gray-700">Combined</h3>
+        {combined.biz_is_loss ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+              <span>⚠</span>
+              <span>Business is in a loss of <strong>{fmt(Math.abs(combined.biz_net))}</strong> — non-commercial loss rules (Div 35) may prevent offsetting this against salary. <a href="https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss" target="_blank" rel="noreferrer" className="underline">ATO guidance →</a></span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Salary taxable (NCL applies)</span>
+              <span className="font-bold">{fmt(combined.salary_taxable)}</span>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-xs text-gray-400">Salary taxable</p>
+              <p className="font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Business net</p>
+              <p className="font-bold text-green-600">{fmt(combined.biz_net)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Combined taxable</p>
+              <p className="font-bold text-gray-800">{fmt(combined.taxable_income ?? 0)}</p>
+            </div>
+          </div>
+        )}
+      </div>
 
-      {sectionTab === "combined" && (
-        <div className="space-y-5">
-          <div className="space-y-2">
-            <div className="flex justify-between items-baseline">
-              <h4 className="text-sm font-semibold text-gray-600">Employment</h4>
-              <span className="text-xs text-green-600">{fmt(estimate.employment.total_deductible)} deductible</span>
-            </div>
-            <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions." />
-          </div>
-          <div className="space-y-2">
-            <div className="flex justify-between items-baseline">
-              <h4 className="text-sm font-semibold text-gray-600">Business</h4>
-              <span className="text-xs text-green-600">{fmt(estimate.business.total_deductible)} deductible</span>
-            </div>
-            <SectionTable section={estimate.business} emptyMsg="No business expense transactions." />
-          </div>
-          <div className="bg-gray-50 rounded-xl border border-gray-100 p-4 flex justify-between items-center">
-            <span className="text-sm font-semibold text-gray-700">Total Deductible</span>
-            <span className="text-2xl font-bold text-green-600">{fmt(estimate.total_deductible)}</span>
-          </div>
-        </div>
-      )}
+      {/* Tax position */}
+      <TaxPosition combined={combined} source={estimate.gross_salary_source} />
 
       <p className="text-xs text-gray-400">Estimates only — consult a registered tax agent before lodging.</p>
     </div>
@@ -299,6 +407,11 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
                 <div className="space-y-1">
                   <div className="flex justify-between text-sm"><span className="text-gray-500">Taxable income</span><span className="font-medium">{fmt(combined.ncl_applies!.taxable_income)}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-gray-500">Est. tax payable</span><span className="font-bold text-red-500">{fmt(combined.ncl_applies!.estimated_tax)}</span></div>
+                  {combined.payg_withheld > 0 && (
+                    combined.ncl_applies!.tax_owing > 0
+                      ? <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. to pay (after PAYG)</span><span className="font-bold text-red-500">{fmt(combined.ncl_applies!.tax_owing)}</span></div>
+                      : <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. refund (after PAYG)</span><span className="font-bold text-green-600">{fmt(combined.ncl_applies!.tax_refund)}</span></div>
+                  )}
                 </div>
                 <p className="text-xs text-gray-400">{combined.ncl_applies!.note}</p>
               </div>
@@ -307,6 +420,11 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
                 <div className="space-y-1">
                   <div className="flex justify-between text-sm"><span className="text-gray-500">Taxable income</span><span className="font-medium">{fmt(combined.ncl_exempt!.taxable_income)}</span></div>
                   <div className="flex justify-between text-sm"><span className="text-gray-500">Est. tax payable</span><span className="font-bold text-red-500">{fmt(combined.ncl_exempt!.estimated_tax)}</span></div>
+                  {combined.payg_withheld > 0 && (
+                    combined.ncl_exempt!.tax_owing > 0
+                      ? <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. to pay (after PAYG)</span><span className="font-bold text-red-500">{fmt(combined.ncl_exempt!.tax_owing)}</span></div>
+                      : <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. refund (after PAYG)</span><span className="font-bold text-green-600">{fmt(combined.ncl_exempt!.tax_refund)}</span></div>
+                  )}
                 </div>
                 <p className="text-xs text-gray-400">{combined.ncl_exempt!.note}</p>
               </div>
@@ -330,6 +448,27 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
               <p className="text-xs text-gray-400">Est. tax payable</p>
               <p className="text-2xl font-bold text-red-500">{fmt(combined.estimated_tax!)}</p>
             </div>
+            {combined.payg_withheld > 0 && (
+              <>
+                <div className="col-span-3 border-t border-gray-100 pt-1">
+                  <p className="text-xs text-gray-400">PAYG withheld</p>
+                  <p className="text-lg font-bold text-green-600">− {fmt(combined.payg_withheld)}</p>
+                </div>
+                <div className="col-span-3 border-t border-gray-100 pt-1">
+                  {combined.tax_owing! > 0 ? (
+                    <>
+                      <p className="text-xs text-gray-400">Est. tax to pay</p>
+                      <p className="text-2xl font-bold text-red-500">{fmt(combined.tax_owing!)}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-400">Est. tax refund</p>
+                      <p className="text-2xl font-bold text-green-600">{fmt(combined.tax_refund!)}</p>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
         <p className="text-xs text-gray-400">{combined.tax_brackets}</p>

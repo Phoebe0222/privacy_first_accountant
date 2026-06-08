@@ -111,6 +111,12 @@ def init_db():
         if not db.get(AppSettings, "user_type"):
             db.add(AppSettings(key="user_type", value="small_business"))
             db.commit()
+        if not db.get(AppSettings, "income_type"):
+            db.add(AppSettings(key="income_type", value="both"))
+            db.commit()
+        if not db.get(AppSettings, "gst_registered"):
+            db.add(AppSettings(key="gst_registered", value="false"))
+            db.commit()
 
         # Seed built-in vendor rules if none exist yet
         if db.query(VendorRule).filter(VendorRule.built_in == True).count() == 0:  # noqa: E712

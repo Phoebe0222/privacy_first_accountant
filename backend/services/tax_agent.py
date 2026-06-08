@@ -97,13 +97,15 @@ async def _assess_category_group(
     taxpayer_type: str,
     ato_year: str,
     rag,
+    amount_fn=None,
 ) -> tuple[list[dict], float]:
     """Assess all categories in a group. Returns (items, total_deductible)."""
+    _amt = amount_fn or (lambda t: t.amount or 0)
     items = []
     total_deductible = 0.0
 
-    for cat, cat_txs in sorted(by_cat.items(), key=lambda x: sum(t.amount for t in x[1]), reverse=True):
-        total_spent = round(sum(t.amount for t in cat_txs), 2)
+    for cat, cat_txs in sorted(by_cat.items(), key=lambda x: sum(_amt(t) for t in x[1]), reverse=True):
+        total_spent = round(sum(_amt(t) for t in cat_txs), 2)
         vendors = list({t.vendor for t in cat_txs if t.vendor and t.vendor != "Unknown"})
 
         query = (
@@ -149,13 +151,29 @@ async def run_tax_estimate(year: int, db) -> dict:
       - Business: sales income + business expense deductions
       - Combined: total taxable income → estimated tax payable
     """
-    from backend.models import Transaction
+    from backend.models import Transaction, AppSettings
     from backend.services import rag
 
     date_from = f"{year}-07-01"
     date_to   = f"{year + 1}-06-30"
     tax_year  = f"{year}-{str(year + 1)[2:]}"
     ato_year  = "2025-2026"
+
+    # Tax profile settings
+    gst_row = db.get(AppSettings, "gst_registered")
+    gst_registered = (gst_row.value == "true") if gst_row else False
+
+    gross_salary_row = db.get(AppSettings, "gross_salary")
+    gross_salary_setting = float(gross_salary_row.value) if gross_salary_row and gross_salary_row.value else 0.0
+
+    payg_withheld_row = db.get(AppSettings, "payg_withheld")
+    payg_withheld_setting = float(payg_withheld_row.value) if payg_withheld_row and payg_withheld_row.value else 0.0
+
+    def _tax_excl(t) -> float:
+        """Return GST-exclusive amount for business transactions when GST registered."""
+        if gst_registered:
+            return max(0.0, (t.amount or 0) - (t.tax or 0))
+        return t.amount or 0
 
     base = dict(
         source_filter=["bank_csv", "manual"],
@@ -176,9 +194,10 @@ async def run_tax_estimate(year: int, db) -> dict:
         )
 
     # ── Salary section ────────────────────────────────────────────────────────
-    # Income: salary transactions (PAYG — any business flag)
+    # Income: prefer settings-based YTD gross salary; fall back to transactions
     salary_income_txs = _query([Transaction.type == "income", Transaction.category == "salary"])
-    salary_income = round(sum(t.amount for t in salary_income_txs), 2)
+    tx_salary_income = round(sum(t.amount for t in salary_income_txs), 2)
+    salary_income = gross_salary_setting if gross_salary_setting > 0 else tx_salary_income
 
     # Deductions: personal/unclassified expenses that may be work-related for PAYG earners
     personal_expense_txs = _query([
@@ -201,7 +220,7 @@ async def run_tax_estimate(year: int, db) -> dict:
         Transaction.category == "sales",
         Transaction.tax_kind == "business",
     ])
-    biz_income = round(sum(t.amount for t in biz_income_txs), 2)
+    biz_income = round(sum(_tax_excl(t) for t in biz_income_txs), 2)
 
     # Deductions: business expenses
     biz_expense_txs = _query([
@@ -213,7 +232,7 @@ async def run_tax_estimate(year: int, db) -> dict:
         biz_by_cat.setdefault(t.category or "other", []).append(t)
 
     biz_items, biz_deductible = await _assess_category_group(
-        biz_by_cat, "business", ato_year, rag
+        biz_by_cat, "business", ato_year, rag, amount_fn=_tax_excl
     )
     biz_taxable = max(0.0, round(biz_income - biz_deductible, 2))
 
@@ -228,18 +247,25 @@ async def run_tax_estimate(year: int, db) -> dict:
         taxable_ncl_applies  = salary_taxable                            # loss deferred
         taxable_ncl_exempt   = max(0.0, round(salary_taxable + biz_net, 2))  # loss offsets
 
+        ncl_applies_tax = _calc_tax(taxable_ncl_applies)
+        ncl_exempt_tax  = _calc_tax(taxable_ncl_exempt)
         combined = {
             "salary_taxable":        salary_taxable,
             "biz_net":               biz_net,
             "biz_is_loss":           True,
+            "payg_withheld":         payg_withheld_setting,
             "ncl_applies": {
                 "taxable_income":    taxable_ncl_applies,
-                "estimated_tax":     _calc_tax(taxable_ncl_applies),
+                "estimated_tax":     ncl_applies_tax,
+                "tax_owing":         round(max(0.0, ncl_applies_tax - payg_withheld_setting), 2),
+                "tax_refund":        round(max(0.0, payg_withheld_setting - ncl_applies_tax), 2),
                 "note":              "Business loss deferred — cannot offset salary until an ATO non-commercial loss test is passed or adjusted taxable income exceeds $250,000.",
             },
             "ncl_exempt": {
                 "taxable_income":    taxable_ncl_exempt,
-                "estimated_tax":     _calc_tax(taxable_ncl_exempt),
+                "estimated_tax":     ncl_exempt_tax,
+                "tax_owing":         round(max(0.0, ncl_exempt_tax - payg_withheld_setting), 2),
+                "tax_refund":        round(max(0.0, payg_withheld_setting - ncl_exempt_tax), 2),
                 "note":              "If you pass one of the four NCL tests (income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k), the loss can offset your salary.",
             },
             "ncl_tests_url":         "https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss",
@@ -248,12 +274,16 @@ async def run_tax_estimate(year: int, db) -> dict:
     else:
         # Business is profitable — combine normally.
         combined_taxable = round(salary_taxable + biz_taxable, 2)
+        estimated_tax    = _calc_tax(combined_taxable)
         combined = {
             "salary_taxable":        salary_taxable,
             "biz_net":               biz_net,
             "biz_is_loss":           False,
             "taxable_income":        combined_taxable,
-            "estimated_tax":         _calc_tax(combined_taxable),
+            "estimated_tax":         estimated_tax,
+            "payg_withheld":         payg_withheld_setting,
+            "tax_owing":             round(max(0.0, estimated_tax - payg_withheld_setting), 2),
+            "tax_refund":            round(max(0.0, payg_withheld_setting - estimated_tax), 2),
             "tax_brackets":          "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
         }
 
@@ -269,7 +299,8 @@ async def run_tax_estimate(year: int, db) -> dict:
         },
         "business": {
             "income":            biz_income,
-            "total_expenses":    round(sum(t.amount for t in biz_expense_txs), 2),
+            "gst_registered":    gst_registered,
+            "total_expenses":    round(sum(_tax_excl(t) for t in biz_expense_txs), 2),
             "total_deductible":  biz_deductible,
             "taxable_income":    biz_taxable,
             "items":             biz_items,

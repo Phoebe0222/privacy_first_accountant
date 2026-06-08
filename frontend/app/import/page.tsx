@@ -82,6 +82,10 @@ export default function ImportPage() {
   const [bankCsvUploading, setBankCsvUploading] = useState(false);
   const [bankCsvResult, setBankCsvResult] = useState<string>("");
   const [lastBankCsvFile, setLastBankCsvFile] = useState<string | null>(null);
+  const payslipRef = useRef<HTMLInputElement>(null);
+  const [payslipUploading, setPayslipUploading] = useState(false);
+  const [payslipResult, setPayslipResult] = useState<string>("");
+  const [payslipData, setPayslipData] = useState<{ gross_salary_ytd: number; payg_withheld_ytd: number; employer?: string; pay_period_end?: string } | null>(null);
   const [importHistory, setImportHistory] = useState<{ source: string; source_ref: string; count: number; date_from: string; date_to: string; imported_at: string }[]>([]);
 
   function loadImportHistory() {
@@ -244,6 +248,33 @@ export default function ImportPage() {
     } finally {
       setBankCsvUploading(false);
       removeBankCsvJob();
+    }
+  }
+
+  async function handlePayslipUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (payslipRef.current) payslipRef.current.value = "";
+    setPayslipUploading(true);
+    setPayslipResult("");
+    setPayslipData(null);
+    let jobId: string;
+    try {
+      const res = await api.startPayslipUpload(file);
+      jobId = res.job_id;
+    } catch (err: unknown) {
+      setPayslipResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+      setPayslipUploading(false);
+      return;
+    }
+    try {
+      const d = await api.pollPayslipJob(jobId);
+      setPayslipData(d);
+      setPayslipResult("Payslip imported — Tax Settings updated.");
+    } catch (err: unknown) {
+      setPayslipResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setPayslipUploading(false);
     }
   }
 
@@ -424,6 +455,55 @@ export default function ImportPage() {
                 className="text-xs text-red-400 hover:text-red-600 underline whitespace-nowrap"
               >Remove import</button>
             )}
+          </div>
+        )}
+      </section>
+
+      {/* ── Payslip ── */}
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-700">Payslip</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Upload your payslip PDF (or photo) to automatically extract YTD gross salary and PAYG withheld
+            into Tax Settings — no manual entry needed.
+          </p>
+        </div>
+        <div className="bg-white border-2 border-dashed border-gray-200 rounded-xl p-8 text-center">
+          <input ref={payslipRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp"
+            onChange={handlePayslipUpload} className="hidden" id="payslip-upload" />
+          <label htmlFor="payslip-upload"
+            className="cursor-pointer bg-blue-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors">
+            {payslipUploading ? "Extracting…" : "Choose Payslip"}
+          </label>
+          <p className="text-xs text-gray-400 mt-3">PDF, JPG, PNG, WEBP</p>
+        </div>
+        {payslipResult && (
+          <p className={`text-sm ${payslipResult.startsWith("Error") ? "text-red-500" : "text-green-600"}`}>
+            {payslipResult}
+          </p>
+        )}
+        {payslipData && (
+          <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-sm space-y-1">
+            {payslipData.employer && (
+              <p className="text-xs text-gray-500 mb-2">{payslipData.employer}{payslipData.pay_period_end ? ` · Pay period ending ${payslipData.pay_period_end}` : ""}</p>
+            )}
+            <div className="flex justify-between">
+              <span className="text-gray-600">YTD Gross Salary</span>
+              <span className="font-semibold text-gray-800">
+                {new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(payslipData.gross_salary_ytd)}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-600">YTD PAYG Withheld</span>
+              <span className="font-semibold text-gray-800">
+                {new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(payslipData.payg_withheld_ytd)}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400 pt-1">
+              Saved to{" "}
+              <a href="/tax-settings" className="text-blue-500 hover:underline">Tax Settings</a>.
+              The tax estimate will use these figures.
+            </p>
           </div>
         )}
       </section>

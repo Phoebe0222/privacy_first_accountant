@@ -33,6 +33,11 @@ export default function BASPage() {
   const [result, setResult] = useState<BasResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const [taxProfile, setTaxProfile] = useState<{ income_type: string; gst_registered: boolean } | null>(null);
+
+  useEffect(() => {
+    api.getTaxProfile().then(setTaxProfile).catch(() => {});
+  }, []);
 
   function load() {
     setLoading(true);
@@ -53,6 +58,26 @@ export default function BASPage() {
         <h2 className="text-2xl font-bold text-gray-800">BAS / GST</h2>
         <p className="text-sm text-gray-400 mt-1">Business Activity Statement estimate based on bank transactions marked as business.</p>
       </div>
+
+      {/* Not applicable notices */}
+      {taxProfile?.income_type === "employment" && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-1">
+          <p className="font-medium text-gray-700">BAS not required</p>
+          <p className="text-sm text-gray-500">Your tax profile is set to Employment only. BAS / GST reporting applies to businesses, not PAYG salary earners.</p>
+          <a href="/tax-settings" className="text-sm text-blue-500 hover:underline">Change in Tax Settings →</a>
+        </div>
+      )}
+
+      {taxProfile && taxProfile.income_type !== "employment" && !taxProfile.gst_registered && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-1">
+          <p className="font-medium text-amber-800">Not registered for GST</p>
+          <p className="text-sm text-amber-700">
+            BAS is only required once you are registered for GST (mandatory when annual turnover ≥ $75,000,
+            or voluntary below that). Your estimate is shown below for reference, but no BAS needs to be lodged.
+          </p>
+          <a href="/tax-settings" className="text-sm text-blue-500 hover:underline">Update GST status in Tax Settings →</a>
+        </div>
+      )}
 
       {/* Period selectors */}
       <div className="flex gap-3 items-center">

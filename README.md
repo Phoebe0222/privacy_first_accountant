@@ -82,7 +82,24 @@ GST registration warning
 ```
 
 
-### 9. Budgeting
+### 9. Tax scenarios
+
+Tax behaviour is driven by two user settings: `income_type` and `gst_registered`.
+
+| Scenario | income_type | gst_registered | profit/loss | Key behaviour |
+|---|---|---|---|---|
+| Pure salary | employment | false | — | No BAS · work-related deductions only · tax = salary − employment deductions |
+| Business + GST + profit | business / both | true | profit | BAS enabled · GST-exclusive amounts for income tax · combine with salary |
+| Business + GST + loss | business / both | true | loss | BAS enabled · GST-exclusive amounts · NCL rules (Div 35) — loss may be deferred |
+| Business no GST + profit | business / both | false | profit | No BAS · full amounts · $75k threshold warning · combine with salary |
+| Business no GST + loss | business / both | false | loss | No BAS · full amounts · $75k threshold warning · NCL rules — loss may be deferred |
+
+NCL = non-commercial loss (Division 35 ITAA 1997).
+A business loss cannot offset salary income unless one of four ATO tests is passed
+(income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k),
+or adjusted taxable income exceeds $250,000.
+
+### 10. Budgeting
 ### 10. Cash flow forecasting 
 
 ## Core Architecture 

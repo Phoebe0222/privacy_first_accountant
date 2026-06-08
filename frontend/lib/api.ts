@@ -159,6 +159,23 @@ export const api = {
     return req<{ job_id: string }>("/import/bank-csv", { method: "POST", body: form });
   },
 
+  startPayslipUpload: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return req<{ job_id: string }>("/import/payslip", { method: "POST", body: form });
+  },
+
+  pollPayslipJob: async (jobId: string): Promise<{ gross_salary_ytd: number; payg_withheld_ytd: number; employer?: string; pay_period_end?: string }> => {
+    while (true) {
+      const job = await req<{ status: string; payslip?: { gross_salary_ytd: number; payg_withheld_ytd: number; employer?: string; pay_period_end?: string }; error?: string }>(
+        `/import/jobs/${jobId}`
+      );
+      if (job.status === "done" && job.payslip) return job.payslip;
+      if (job.status === "failed") throw new Error(job.error ?? "Payslip processing failed");
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  },
+
   // ── Vendor rules ────────────────────────────────────────────────────────
 
   getVendorRules: () => req<{ id: number; vendor_pattern: string; category: string }[]>("/vendor-rules"),
@@ -202,6 +219,16 @@ export const api = {
     req<{ role: string; content: string; created_at: string }[]>("/chat/history"),
 
   clearChatHistory: () => req<{ ok: boolean }>("/chat/history", { method: "DELETE" }),
+
+  // ── Tax profile settings ─────────────────────────────────────────────────
+  getTaxProfile: () =>
+    req<{ income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number }>("/settings/tax-profile"),
+  updateTaxProfile: (data: { income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number }) =>
+    req<{ income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number }>("/settings/tax-profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
 
   // ── Deductions ──────────────────────────────────────────────────────────
 
@@ -284,9 +311,11 @@ export interface DeductionItem {
 }
 
 export interface DeductionSection {
+  income: number;
   items: DeductionItem[];
   total_deductible: number;
   total_expenses: number;
+  taxable_income: number;
 }
 
 export interface DeductionsEstimate {
@@ -294,8 +323,20 @@ export interface DeductionsEstimate {
   period: string;
   date_range: string;
   user_type: string;
+  gross_salary_source: "settings" | "transactions";
+  payg_withheld: number;
   business: DeductionSection;
   employment: DeductionSection;
+  combined: {
+    biz_is_loss: boolean;
+    biz_net: number;
+    salary_taxable: number;
+    taxable_income: number | null;
+    income_tax: number;
+    payg_withheld: number;
+    tax_owing: number;
+    tax_refund: number;
+  };
   total_deductible: number;
   total_expenses: number;
   items: DeductionItem[];
@@ -330,12 +371,15 @@ export interface AITaxEstimate {
     biz_net: number;
     biz_is_loss: boolean;
     tax_brackets: string;
+    payg_withheld: number;
     // profitable path
     taxable_income?: number;
     estimated_tax?: number;
+    tax_owing?: number;
+    tax_refund?: number;
     // loss path (NCL rules)
-    ncl_applies?: { taxable_income: number; estimated_tax: number; note: string };
-    ncl_exempt?: { taxable_income: number; estimated_tax: number; note: string };
+    ncl_applies?: { taxable_income: number; estimated_tax: number; tax_owing: number; tax_refund: number; note: string };
+    ncl_exempt?: { taxable_income: number; estimated_tax: number; tax_owing: number; tax_refund: number; note: string };
     ncl_tests_url?: string;
   };
   note: string;
