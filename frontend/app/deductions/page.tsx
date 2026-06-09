@@ -19,7 +19,7 @@ export default function DeductionsPage() {
   const [userType, setUserType] = useState("small_business");
   const [estimate, setEstimate] = useState<DeductionsEstimate | null>(null);
   const [aiEstimate, setAiEstimate] = useState<AITaxEstimate | null>(null);
-  const [rules, setRules] = useState<DeductionRule[]>([]);
+  const [incomeType, setIncomeType] = useState("both");
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -27,14 +27,13 @@ export default function DeductionsPage() {
 
   useEffect(() => {
     api.getDeductionSettings().then((s) => setUserType(s.user_type));
+    api.getTaxProfile().then((p) => setIncomeType(p.income_type));
   }, []);
 
   useEffect(() => {
     if (tab === "estimate") {
       setLoading(true);
       api.getDeductionsEstimate(year).then(setEstimate).finally(() => setLoading(false));
-    } else if (tab === "rules") {
-      api.getDeductionRules(userType).then(setRules);
     }
   }, [tab, year, userType]);
 
@@ -72,7 +71,7 @@ export default function DeductionsPage() {
         </div>
       </div>
 
-      {tab === "estimate" && (loading ? <p className="text-gray-400">Calculating…</p> : estimate && <EstimateTab estimate={estimate} />)}
+      {tab === "estimate" && (loading ? <p className="text-gray-400">Calculating…</p> : estimate && <EstimateTab estimate={estimate} incomeType={incomeType} />)}
       {tab === "ai" && (
         aiLoading ? (
           <div className="flex flex-col items-center gap-4 py-16">
@@ -92,7 +91,7 @@ export default function DeductionsPage() {
                 Re-run AI
               </button>
             </div>
-            <AIEstimateTab result={aiEstimate} />
+            <AIEstimateTab result={aiEstimate} incomeType={incomeType} />
           </div>
         ) : (
           <div className="flex flex-col items-center gap-4 py-16 text-center">
@@ -108,7 +107,7 @@ export default function DeductionsPage() {
           </div>
         )
       )}
-      {tab === "rules" && <RulesTab userType={userType} rules={rules} onRulesChange={setRules} />}
+      {tab === "rules" && <RulesTab userType={userType} incomeType={incomeType} />}
       {tab === "ato" && <ATOContextTab />}
     </div>
   );
@@ -223,71 +222,81 @@ function TaxPosition({ combined, source }: { combined: DeductionsEstimate["combi
   );
 }
 
-function EstimateTab({ estimate }: { estimate: DeductionsEstimate }) {
+function EstimateTab({ estimate, incomeType }: { estimate: DeductionsEstimate; incomeType: string }) {
   const { combined } = estimate;
+  const showEmp = incomeType !== "business";
+  const showBiz = incomeType !== "employment";
+  const showCombined = showEmp && showBiz;
 
   return (
     <div className="space-y-6">
       <p className="text-xs text-gray-400">{estimate.period} · {estimate.date_range}</p>
 
       {/* Employment */}
-      <div className="space-y-3">
-        <h3 className="font-semibold text-gray-700">Employment</h3>
-        <EstimateSectionHeader label="Salary" section={estimate.employment} />
-        <p className="text-xs text-gray-400">
-          {estimate.gross_salary_source === "settings"
-            ? "Salary from Tax Settings (YTD payslip figure). Work-related deductions applied."
-            : "Work-related deductions on employment transactions."}
-        </p>
-        <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions. Mark transactions as Employment in the Transactions page." />
-      </div>
+      {showEmp && (
+        <div className="space-y-3">
+          <h3 className="font-semibold text-gray-700">Employment</h3>
+          <EstimateSectionHeader label="Salary" section={estimate.employment} />
+          <p className="text-xs text-gray-400">
+            {estimate.gross_salary_source === "settings"
+              ? "Salary from Tax Settings (YTD payslip figure). Work-related deductions applied."
+              : "Work-related deductions on employment transactions."}
+          </p>
+          <SectionTable section={estimate.employment} emptyMsg="No employment expense transactions. Mark transactions as Employment in the Transactions page." />
+        </div>
+      )}
 
-      <hr className="border-gray-100" />
+      {showCombined && <hr className="border-gray-100" />}
 
       {/* Business */}
-      <div className="space-y-3">
-        <h3 className="font-semibold text-gray-700">Business</h3>
-        <EstimateSectionHeader label="Business" section={estimate.business} />
-        <p className="text-xs text-gray-400">Deductible business expenses against sales revenue.</p>
-        <SectionTable section={estimate.business} emptyMsg="No business expense transactions. Mark transactions as Business in the Transactions page." />
-      </div>
+      {showBiz && (
+        <div className="space-y-3">
+          <h3 className="font-semibold text-gray-700">Business</h3>
+          <EstimateSectionHeader label="Business" section={estimate.business} />
+          <p className="text-xs text-gray-400">Deductible business expenses against sales revenue.</p>
+          <SectionTable section={estimate.business} emptyMsg="No business expense transactions. Mark transactions as Business in the Transactions page." />
+        </div>
+      )}
 
-      <hr className="border-gray-100" />
-
-      {/* Combined */}
-      <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
-        <h3 className="font-semibold text-gray-700">Combined</h3>
-        {combined.biz_is_loss ? (
-          <div className="space-y-3">
-            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-              <span>⚠</span>
-              <span>Business is in a loss of <strong>{fmt(Math.abs(combined.biz_net))}</strong> — non-commercial loss rules (Div 35) may prevent offsetting this against salary. <a href="https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss" target="_blank" rel="noreferrer" className="underline">ATO guidance →</a></span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Salary taxable (NCL applies)</span>
-              <span className="font-bold">{fmt(combined.salary_taxable)}</span>
-            </div>
+      {/* Combined — only when both income types are active */}
+      {showCombined && (
+        <>
+          <hr className="border-gray-100" />
+          <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
+            <h3 className="font-semibold text-gray-700">Combined</h3>
+            {combined.biz_is_loss ? (
+              <div className="space-y-3">
+                <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                  <span>⚠</span>
+                  <span>Business is in a loss of <strong>{fmt(Math.abs(combined.biz_net))}</strong> — non-commercial loss rules (Div 35) may prevent offsetting this against salary. <a href="https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss" target="_blank" rel="noreferrer" className="underline">ATO guidance →</a></span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Salary taxable (NCL applies)</span>
+                  <span className="font-bold">{fmt(combined.salary_taxable)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div>
+                  <p className="text-xs text-gray-400">Salary taxable</p>
+                  <p className="font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Business net</p>
+                  <p className="font-bold text-green-600">{fmt(combined.biz_net)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-400">Combined taxable</p>
+                  <p className="font-bold text-gray-800">{fmt(combined.taxable_income ?? 0)}</p>
+                </div>
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <div>
-              <p className="text-xs text-gray-400">Salary taxable</p>
-              <p className="font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400">Business net</p>
-              <p className="font-bold text-green-600">{fmt(combined.biz_net)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400">Combined taxable</p>
-              <p className="font-bold text-gray-800">{fmt(combined.taxable_income ?? 0)}</p>
-            </div>
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
-      {/* Tax position */}
-      <TaxPosition combined={combined} source={estimate.gross_salary_source} />
+      {/* Tax position — only for employment (PAYG applies to salary earners) */}
+      {showEmp && <TaxPosition combined={combined} source={estimate.gross_salary_source} />}
 
       <p className="text-xs text-gray-400">Estimates only — consult a registered tax agent before lodging.</p>
     </div>
@@ -357,38 +366,45 @@ function SectionSummary({ label, section }: { label: string; section: AITaxSecti
   );
 }
 
-function AIEstimateTab({ result }: { result: AITaxEstimate }) {
+function AIEstimateTab({ result, incomeType }: { result: AITaxEstimate; incomeType: string }) {
   if (result.error) return <p className="text-red-500 text-sm">{result.error}</p>;
   const { salary, business, combined } = result;
+  const showSalary = incomeType !== "business";
+  const showBiz    = incomeType !== "employment";
+  const showCombined = showSalary && showBiz;
 
   return (
     <div className="space-y-6">
 
       {/* Salary section */}
-      <div className="space-y-3">
-        <h3 className="font-semibold text-gray-700">Salary Income</h3>
-        <SectionSummary label="Salary" section={salary} />
-        <p className="text-xs text-gray-400">Work-related deductions on personal (non-business) expenses.</p>
-        <DeductionTable items={salary.items} />
-      </div>
+      {showSalary && (
+        <div className="space-y-3">
+          <h3 className="font-semibold text-gray-700">Salary Income</h3>
+          <SectionSummary label="Salary" section={salary} />
+          <p className="text-xs text-gray-400">Work-related deductions on personal (non-business) expenses.</p>
+          <DeductionTable items={salary.items} />
+        </div>
+      )}
 
-      <hr className="border-gray-100" />
+      {showCombined && <hr className="border-gray-100" />}
 
       {/* Business section */}
-      <div className="space-y-3">
-        <h3 className="font-semibold text-gray-700">Business Income</h3>
-        <SectionSummary label="Business" section={business} />
-        <p className="text-xs text-gray-400">Deductible business expenses against sales revenue.</p>
-        <DeductionTable items={business.items} />
-      </div>
+      {showBiz && (
+        <div className="space-y-3">
+          <h3 className="font-semibold text-gray-700">Business Income</h3>
+          <SectionSummary label="Business" section={business} />
+          <p className="text-xs text-gray-400">Deductible business expenses against sales revenue.</p>
+          <DeductionTable items={business.items} />
+        </div>
+      )}
 
-      <hr className="border-gray-100" />
+      {showCombined && <hr className="border-gray-100" />}
 
-      {/* Combined */}
+      {/* Combined / single-income tax summary */}
       <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-4">
-        <h3 className="font-semibold text-gray-700">Combined Tax Estimate</h3>
+        <h3 className="font-semibold text-gray-700">{showCombined ? "Combined Tax Estimate" : "Tax Estimate"}</h3>
 
-        {combined.biz_is_loss ? (
+        {showCombined && combined.biz_is_loss ? (
           <div className="space-y-4">
             <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
               <span className="text-amber-500 mt-0.5">⚠</span>
@@ -430,7 +446,7 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
               </div>
             </div>
           </div>
-        ) : (
+        ) : showCombined ? (
           <div className="grid grid-cols-3 gap-3 text-center">
             <div>
               <p className="text-xs text-gray-400">Salary taxable</p>
@@ -470,6 +486,51 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
               </>
             )}
           </div>
+        ) : showSalary ? (
+          /* Employment only */
+          <div className="space-y-3 text-center">
+            <div>
+              <p className="text-xs text-gray-400">Salary taxable</p>
+              <p className="text-lg font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400">Est. tax payable</p>
+              <p className="text-2xl font-bold text-red-500">{fmt(combined.estimated_tax!)}</p>
+            </div>
+            {combined.payg_withheld > 0 && (
+              <>
+                <div className="border-t border-gray-100 pt-3">
+                  <p className="text-xs text-gray-400">PAYG withheld</p>
+                  <p className="text-lg font-bold text-green-600">− {fmt(combined.payg_withheld)}</p>
+                </div>
+                <div className="border-t border-gray-100 pt-3">
+                  {combined.tax_owing! > 0 ? (
+                    <>
+                      <p className="text-xs text-gray-400">Est. tax to pay</p>
+                      <p className="text-2xl font-bold text-red-500">{fmt(combined.tax_owing!)}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-gray-400">Est. tax refund</p>
+                      <p className="text-2xl font-bold text-green-600">{fmt(combined.tax_refund!)}</p>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          /* Business only */
+          <div className="space-y-3 text-center">
+            <div>
+              <p className="text-xs text-gray-400">Business net profit</p>
+              <p className="text-lg font-bold text-green-600">{fmt(combined.biz_net)}</p>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs text-gray-400">Est. tax payable</p>
+              <p className="text-2xl font-bold text-red-500">{fmt(combined.estimated_tax!)}</p>
+            </div>
+          </div>
         )}
         <p className="text-xs text-gray-400">{combined.tax_brackets}</p>
       </div>
@@ -479,7 +540,50 @@ function AIEstimateTab({ result }: { result: AITaxEstimate }) {
   );
 }
 
-function RulesTab({ userType, rules, onRulesChange }: { userType: string; rules: DeductionRule[]; onRulesChange: (r: DeductionRule[]) => void }) {
+function RulesTab({ userType, incomeType }: { userType: string; incomeType: string }) {
+  const showEmp = incomeType !== "business";
+  const showBiz = incomeType !== "employment";
+  const [section, setSection] = useState<"employment" | "business">(showEmp ? "employment" : "business");
+  const [empRules, setEmpRules] = useState<DeductionRule[]>([]);
+  const [bizRules, setBizRules] = useState<DeductionRule[]>([]);
+
+  useEffect(() => {
+    if (showEmp) api.getDeductionRules("individual_salary").then(setEmpRules);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (showBiz) api.getDeductionRules(userType).then(setBizRules);
+  }, [userType]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="space-y-4">
+      {showEmp && showBiz && (
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setSection("employment")}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${section === "employment" ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+          >
+            Employment
+          </button>
+          <button
+            onClick={() => setSection("business")}
+            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${section === "business" ? "bg-gray-800 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}
+          >
+            Business
+          </button>
+        </div>
+      )}
+      {(section === "employment" || !showBiz) && showEmp && (
+        <SingleRuleSet userType="individual_salary" rules={empRules} onRulesChange={setEmpRules} />
+      )}
+      {(section === "business" || !showEmp) && showBiz && (
+        <SingleRuleSet userType={userType} rules={bizRules} onRulesChange={setBizRules} />
+      )}
+    </div>
+  );
+}
+
+function SingleRuleSet({ userType, rules, onRulesChange }: { userType: string; rules: DeductionRule[]; onRulesChange: (r: DeductionRule[]) => void }) {
   const [editId, setEditId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ rate: 0, label: "", note: "" });
   const [showAdd, setShowAdd] = useState(false);
