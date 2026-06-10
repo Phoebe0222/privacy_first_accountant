@@ -55,6 +55,7 @@ Comparing to similar past transactions, if the transaction is more than twice or
 ### 7. Tax deductibles
 For any tax payer, estimate the tax deductions, based on rules and llm. 
 
+
 ### 8. BAS/GST reports
 For small business, estimate BAS/GST based on the sales. This is deterministic.
 
@@ -86,21 +87,32 @@ GST registration warning
 
 Tax behaviour is driven by two user settings: `income_type` and `gst_registered`.
 
-| Scenario | income_type | gst_registered | profit/loss | Key behaviour |
-|---|---|---|---|---|
-| Pure salary | employment | false | — | No BAS · work-related deductions only · tax = salary − employment deductions |
-| Business + GST + profit | business / both | true | profit | BAS enabled · GST-exclusive amounts for income tax · combine with salary |
-| Business + GST + loss | business / both | true | loss | BAS enabled · GST-exclusive amounts · NCL rules (Div 35) — loss may be deferred |
-| Business no GST + profit | business / both | false | profit | No BAS · full amounts · $75k threshold warning · combine with salary |
-| Business no GST + loss | business / both | false | loss | No BAS · full amounts · $75k threshold warning · NCL rules — loss may be deferred |
+| Scenario | income_type | gst_registered | profit/loss | Key behaviour | Taxable Income |
+|---|---|---|---|---|---|
+| Pure salary | employment | false | — | No BAS · work-related deductions only · tax = salary − employment deductions | `salary_income − salary_deductions` |
+| Business + GST + profit | business / both | true | profit | BAS enabled · GST-exclusive amounts for income tax · combine with salary | `(salary_income − salary_deductions) + biz_net` *(GST-exclusive)* |
+| Business + GST + loss | business / both | true | loss | BAS enabled · GST-exclusive amounts · NCL rules (Div 35) — loss may be deferred | loss deferred: `salary_income − salary_deductions`<br>loss offsets: `+ biz_net` *(GST-exclusive)* |
+| Business no GST + profit | business / both | false | profit | No BAS · full amounts · $75k threshold warning · combine with salary | `(salary_income − salary_deductions) + biz_net` |
+| Business no GST + loss | business / both | false | loss | No BAS · full amounts · $75k threshold warning · NCL rules — loss may be deferred | loss deferred: `salary_income − salary_deductions`<br>loss offsets: `+ biz_net` |
+
+`biz_net = biz_income − biz_deductions` (negative when the business is in loss).
 
 NCL = non-commercial loss (Division 35 ITAA 1997).
-A business loss cannot offset salary income unless one of four ATO tests is passed
-(income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k),
-or adjusted taxable income exceeds $250,000.
+A business loss can only offset salary income if BOTH:
+- the income requirement is met — taxable income, reportable fringe benefits, reportable
+  super contributions and net investment losses (excluding this business loss) are
+  under $250,000, AND
+- one of four ATO tests is passed
+  (business income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k).
 
+Otherwise the loss is deferred (carried forward against future profits from the same activity).
+source:
+- https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/income-you-must-declare/business-partnership-and-trust-income
+- https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/deductions-you-can-claim/how-to-claim-deductions
+- https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/income-and-deductions-for-business/business-losses
+- https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss
 ### 10. Budgeting
-### 10. Cash flow forecasting 
+### 11. Cash flow forecasting 
 
 ## Core Architecture 
 Frontend:
@@ -228,6 +240,12 @@ Vector DB:
 5. better categorization and detect anomoly 
 
 - ### tax interpretations
+1. caller builds a plain-English question — `tax_agent._assess_category_group` asks "Is `<category>` deductible for Australian employee/small business?" once per expense category, or the chat agent's `query_tax_rules` tool passes the user's own question
+2. `rag.search_ato_rules(query, year)` first calls `ensure_live_ato_rules(year)` — on first use for a tax year this live-fetches each seeded ATO page (`backend/data/ato_rules/<year>/*.txt`, whose header gives the `Source:` URL and `Category:`), strips it down to plain text, chunks it, embeds each chunk and upserts it into the `ato_rules` collection tagged `source: "live"`. Idempotent — later calls for the same year skip straight to step 3
+3. embed the question and search the `ato_rules` collection (filtered by `year`) for the closest chunks — these include both the live-fetched chunks and the bundled chunks already indexed by the `ato-init` job (`ato_fetcher.py`)
+4. return the top matches as `[{text, category, url}]`
+5. tax agent: the matched text becomes `ato_context`, fed into the `_assess` LLM prompt together with the category, vendors and total spent, returning a deductible `rate`, `reasoning` and `ato_reference`. Chat agent: the matched text and source URLs are returned to the user directly as an answer
+6. if a live page fetch fails (network error, page moved, etc.) it's logged and skipped — the bundled seed text for that category is still in the collection and continues to serve the search
 
 - ### GST categories
 

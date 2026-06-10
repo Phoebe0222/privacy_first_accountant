@@ -10,6 +10,10 @@ Each file has a header block:
   Tax Year: <year>
 
 Idempotent — skips if the year is already loaded.
+
+For live (non-bundled) ATO content fetched on demand at agent runtime, see
+backend.services.rag.ensure_live_ato_rules — it reuses _chunk() from this module
+but fetches the `Source:` URLs live from ato.gov.au instead of the bundled body text.
 """
 import argparse
 import logging

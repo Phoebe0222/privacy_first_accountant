@@ -31,6 +31,8 @@ _BRACKETS = [
     (float("inf"), 0.45, 190_000),
 ]
 _LOW_INCOME_OFFSET_MAX = 700
+# TODO: medicare levy surcharge only applies for high-income earners without private health insurance
+# add an option in the tax settings and adjust the calculation accordingly
 _MEDICARE = 0.02
 
 
@@ -199,13 +201,13 @@ async def run_tax_estimate(year: int, db) -> dict:
     tx_salary_income = round(sum(t.amount for t in salary_income_txs), 2)
     salary_income = gross_salary_setting if gross_salary_setting > 0 else tx_salary_income
 
-    # Deductions: personal/unclassified expenses that may be work-related for PAYG earners
-    personal_expense_txs = _query([
+    # Deductions: expenses the categorisation agent flagged as work-related
+    employment_expense_txs = _query([
         Transaction.type == "expense",
-        Transaction.tax_kind.in_(["employment", "na"]),
+        Transaction.tax_kind == "employment",
     ])
     salary_by_cat: dict[str, list] = {}
-    for t in personal_expense_txs:
+    for t in employment_expense_txs:
         salary_by_cat.setdefault(t.category or "other", []).append(t)
 
     salary_items, salary_deductible = await _assess_category_group(
@@ -259,14 +261,14 @@ async def run_tax_estimate(year: int, db) -> dict:
                 "estimated_tax":     ncl_applies_tax,
                 "tax_owing":         round(max(0.0, ncl_applies_tax - payg_withheld_setting), 2),
                 "tax_refund":        round(max(0.0, payg_withheld_setting - ncl_applies_tax), 2),
-                "note":              "Business loss deferred — cannot offset salary until an ATO non-commercial loss test is passed or adjusted taxable income exceeds $250,000.",
+                "note":              "Business loss deferred — applies unless you meet the income requirement (taxable income, reportable fringe benefits, reportable super contributions and net investment losses, excluding this business loss, under $250,000) and pass one of the four non-commercial loss tests.",
             },
             "ncl_exempt": {
                 "taxable_income":    taxable_ncl_exempt,
                 "estimated_tax":     ncl_exempt_tax,
                 "tax_owing":         round(max(0.0, ncl_exempt_tax - payg_withheld_setting), 2),
                 "tax_refund":        round(max(0.0, payg_withheld_setting - ncl_exempt_tax), 2),
-                "note":              "If you pass one of the four NCL tests (income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k), the loss can offset your salary.",
+                "note":              "If your income (excluding this business loss) is under $250,000 and you pass one of the four NCL tests (income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k), the loss can offset your salary.",
             },
             "ncl_tests_url":         "https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss",
             "tax_brackets":          "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
@@ -292,7 +294,7 @@ async def run_tax_estimate(year: int, db) -> dict:
         "period":   f"{date_from} to {date_to}",
         "salary": {
             "income":            salary_income,
-            "total_expenses":    round(sum(t.amount for t in personal_expense_txs), 2),
+            "total_expenses":    round(sum(t.amount for t in employment_expense_txs), 2),
             "total_deductible":  salary_deductible,
             "taxable_income":    salary_taxable,
             "items":             salary_items,
