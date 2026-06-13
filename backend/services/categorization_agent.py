@@ -51,6 +51,7 @@ class CategorizationState(BaseModel):
     amount: float
     tx_type: str
     rules: list[tuple[str, str]]
+    bank_category: str = ""
     # Filled by agents as the chain progresses
     category: Optional[str] = None
     confidence: float = 0.0
@@ -128,7 +129,8 @@ async def _search_history(state: CategorizationState) -> CategorizationState:
         )
         if not vendor_match and not desc_match:
             continue
-        if doc_category and doc_category != "other":
+        from backend.services.constants import VALID_CATEGORIES
+        if doc_category and doc_category != "other" and doc_category in VALID_CATEGORIES:
             categories.append(doc_category)
 
     if not categories:
@@ -163,6 +165,7 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "Description: {description}\n"
         "Amount: ${amount}\n"
         "Type: {tx_type}\n"
+        "{bank_category_hint}"
         "{history_hint}\n"
         "Step 1 — Read the description carefully. If the vendor is generic (e.g. PayPal, bank), "
         "use the description to identify the real merchant or purpose.\n"
@@ -173,7 +176,7 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "Use 'drink' for coffee, tea, bubble tea, smoothies. "
         "Use 'food' for meals, restaurants, takeaway.\n\n"
         "Valid expense categories: food, grocery, drink, transport, travel, utilities, "
-        "software, marketing, fee, gym, medical, office, subscription, shopping, "
+        "software, marketing, fee, gym, medical, office, home_office, subscription, shopping, "
         "leisure, material, other\n"
         "Valid income categories: sales (product/service sales with GST), revenue (dividends, rent, other non-GST income), salary, refund"
     )),
@@ -189,6 +192,7 @@ async def _llm_categorize(state: CategorizationState) -> CategorizationState:
             "description": state.description[:300],
             "amount": f"{float(state.amount or 0):.2f}",
             "tx_type": state.tx_type or "expense",
+            "bank_category_hint": f"Bank category (hint only, may not match valid list): {state.bank_category}\n" if state.bank_category else "",
             "history_hint": f"History hint: {state.history_summary}\n" if state.history_summary else "",
         })
 
@@ -332,6 +336,7 @@ async def categorize_transaction(
     amount: float,
     tx_type: str,
     rules: list[tuple[str, str]],
+    bank_category: str = "",
 ) -> dict:
     """
     Run the categorisation pipeline and return:
@@ -347,6 +352,7 @@ async def categorize_transaction(
         amount=float(amount or 0),
         tx_type=tx_type or "expense",
         rules=rules,
+        bank_category=(bank_category or "").strip(),
     )
     final: CategorizationState = await _pipeline.ainvoke(state)
     return {

@@ -107,12 +107,9 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
 
             # Deduplicate vendors that need categorisation.
             # Transfers (transfer-in / transfer-out) are typed by regex — skip LLM categorisation.
-            pending: dict[str, tuple[str, str, float, str]] = {}
+            pending: dict[str, tuple[str, str, float, str, str]] = {}
             for tx in transactions:
                 if tx.get("type") in ("transfer-in", "transfer-out"):
-                    continue
-                csv_category = tx.get("category") or ""
-                if csv_category and csv_category != "other":
                     continue
                 key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
                 if key not in pending:
@@ -121,17 +118,18 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                         tx.get("description", ""),
                         float(tx.get("amount") or 0),
                         tx.get("type", "expense"),
+                        tx.get("category", ""),
                     )
 
             # Categorise all unique keys concurrently
             sem = asyncio.Semaphore(5)
 
-            async def _categorize_key(key: str, vendor: str, desc: str, amount: float, tx_type: str):
+            async def _categorize_key(key: str, vendor: str, desc: str, amount: float, tx_type: str, bank_category: str):
                 async with sem:
-                    return key, await categorize_transaction(vendor, desc, amount, tx_type, category_rules)
+                    return key, await categorize_transaction(vendor, desc, amount, tx_type, category_rules, bank_category)
 
             results = await asyncio.gather(
-                *[asyncio.create_task(_categorize_key(k, v, d, a, t)) for k, (v, d, a, t) in pending.items()],
+                *[asyncio.create_task(_categorize_key(k, v, d, a, t, b)) for k, (v, d, a, t, b) in pending.items()],
                 return_exceptions=True,
             )
             pipeline_results: dict[str, dict] = {}
@@ -177,17 +175,13 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                     duplicates += 1
                     continue
 
-                csv_category = tx.get("category") or ""
-                if csv_category and csv_category != "other":
-                    data = {**tx, "needs_review": False, "category_confidence": 1.0}
-                else:
-                    key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
-                    cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True, "tax_kind": "na"})
-                    data = {**tx, "category": cat["category"],
-                            "needs_review": cat["needs_review"],
-                            "category_confidence": cat["confidence"],
-                            "tax_kind": cat.get("tax_kind", "na"),
-                            "business": cat.get("tax_kind", "na") == "business"}
+                key = tx["vendor"] if tx["vendor"] != "Unknown" else tx.get("description", "Unknown")
+                cat = pipeline_results.get(key, {"category": "other", "confidence": 0.0, "needs_review": True, "tax_kind": "na"})
+                data = {**tx, "category": cat["category"],
+                        "needs_review": cat["needs_review"],
+                        "category_confidence": cat["confidence"],
+                        "tax_kind": cat.get("tax_kind", "na"),
+                        "business": cat.get("tax_kind", "na") == "business"}
 
                 # Inherit user-set tax_kind from any prior transaction with this vendor
                 if tx.get("vendor") in vendor_business:

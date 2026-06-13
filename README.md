@@ -267,8 +267,8 @@ Vector DB:
 ### Phase 3
 - ATO rule RAG
 - tax explanations
-- forecast modeling
 ### Phase 4
+- forecast modeling
 - accountant collaboration mode
-- one-click export to accountant
+- one-click export
 - audit trail

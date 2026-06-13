@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from backend.database import SessionLocal
 from backend.models import Transaction, VendorRule
 from backend.services import rag
-from backend.services.constants import INCOME_CATEGORIES
+from backend.services.constants import INCOME_CATEGORIES, VALID_CATEGORIES
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,8 @@ def _build_transaction(
         log.warning("ANOMALY | %s | %s | reason: %s", data.get("vendor"), data.get("amount"), data.get("anomaly_reason"))
     tx_type = data.get("type") or "expense"
     raw_category = data.get("category") or "other"
+    if raw_category not in VALID_CATEGORIES:
+        raw_category = "other"
     if tx_type == "income" and raw_category not in INCOME_CATEGORIES:
         raw_category = "revenue"
     elif tx_type == "expense" and raw_category in INCOME_CATEGORIES:
