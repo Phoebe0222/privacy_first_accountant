@@ -1,8 +1,9 @@
 """
 Categorisation pipeline built with LangChain LCEL.
 
-Chain: Rule Agent → History Agent → LLM Agent
-Each step short-circuits when the category is already resolved.
+Chain: Rule Agent → History Agent → LLM Agent → Tax Kind Agent
+The first three steps short-circuit when the category is already resolved.
+The Tax Kind Agent always runs, regardless of how the category was resolved.
 
                 ┌──────────────────┐
   state ──────► │  apply_rules     │ (pure Python, no LLM)
@@ -16,6 +17,11 @@ Each step short-circuits when the category is already resolved.
                          ▼
                 ┌──────────────────┐
                 │  llm_categorize  │ (ChatOllama + structured output)
+                └────────┬─────────┘
+                         │ always
+                         ▼
+                ┌──────────────────┐
+                │ classify_tax_kind│ (static map, else ATO-RAG + ChatOllama)
                 └──────────────────┘
 """
 
@@ -60,14 +66,6 @@ class LLMCategorizationResult(BaseModel):
     category: str = Field(description="Transaction category from the allowed list")
     confidence: float = Field(description="Confidence score 0.0 to 1.0", ge=0.0, le=1.0)
     reasoning: str = Field(description="One sentence explaining the choice")
-    tax_kind: str = Field(
-        description=(
-            "Classification of this transaction — must be one of:\n"
-            "'business' — business expense/income: professional tools, SaaS, office supplies, marketing, staff costs.\n"
-            "'employment' — work-related expense for a PAYG salary earner: home office costs, work tools, work-related phone/internet, work travel, self-education for current job.\n"
-            "'na' — personal or not applicable: groceries, personal entertainment, personal gym, personal shopping, personal meals, personal travel. Default when unclear."
-        )
-    )
 
 
 # ── Agent 1: Deterministic rule matching ─────────────────────────────────────
@@ -169,11 +167,7 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "Step 1 — Read the description carefully. If the vendor is generic (e.g. PayPal, bank), "
         "use the description to identify the real merchant or purpose.\n"
         "Step 2 — Which category fits best?\n"
-        "Step 3 — What is the tax_kind?\n"
-        "  'business': professional tools, SaaS, marketing, office supplies, wages, materials.\n"
-        "  'employment': work-related for a salary earner (home office, work tools, work phone/internet, work travel).\n"
-        "  'na': personal (groceries, entertainment, gym, personal shopping, meals, drinks). Default.\n"
-        "Step 4 — How confident are you in the category? (0.0–1.0)\n\n"
+        "Step 3 — How confident are you in the category? (0.0–1.0)\n\n"
         "Amount hint: if the amount is under $15 and the vendor is a coffee shop, "
         "bubble tea, or café — use 'drink', not 'food'. "
         "Use 'drink' for coffee, tea, bubble tea, smoothies. "
@@ -209,17 +203,105 @@ async def _llm_categorize(state: CategorizationState) -> CategorizationState:
             "LLM categorize | %s → %s (%.0f%%) needs_review=%s | %s",
             state.vendor, category, confidence * 100, needs_review, result.reasoning,
         )
-        tax_kind = result.tax_kind if result.tax_kind in ("business", "employment", "na") else "na"
         return state.model_copy(update={
             "category": category,
             "confidence": confidence,
             "needs_review": needs_review,
             "method": "llm",
-            "tax_kind": tax_kind,
         })
     except Exception as e:
         log.warning("LLM categorize failed for '%s': %s", state.vendor, e)
         return state  # leaves category=None, method="fallback"
+
+
+# ── Agent 4: Tax-kind classification (ATO-RAG + ChatOllama) ───────────────────
+
+TAX_YEAR = "2025-2026"
+
+# Categories whose tax_kind is unambiguous regardless of vendor — skip RAG/LLM.
+_STATIC_TAX_KIND: dict[str, str] = {
+    "salary": "employment",
+    "refund": "na",
+    "sales": "business",
+    "marketing": "business",
+    "material": "business",
+    "grocery": "na",
+    "drink": "na",
+    "food": "na",
+    "gym": "na",
+    "leisure": "na",
+    "shopping": "na",
+    "medical": "na",
+}
+
+
+class TaxKindResult(BaseModel):
+    tax_kind: str = Field(
+        description=(
+            "Tax treatment of this transaction — must be one of:\n"
+            "'business' — business expense or business income (sole trader/ABN activity).\n"
+            "'employment' — work-related deduction for a PAYG salary earner.\n"
+            "'na' — personal, non-deductible, or not applicable."
+        )
+    )
+    reasoning: str = Field(description="One sentence explaining the choice, citing the ATO guidance if relevant")
+
+
+_TAX_KIND_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", (
+        "You are an Australian tax assistant. The taxpayer has both PAYG salary income and a "
+        "sole trader/small business ABN. Decide how this transaction should be treated for tax "
+        f"purposes in the {TAX_YEAR} financial year, using the ATO guidance excerpts as context. "
+        "Think step by step, then return only the JSON object."
+    )),
+    ("human", (
+        "Vendor: {vendor}\n"
+        "Description: {description}\n"
+        "Category: {category}\n"
+        "Amount: ${amount}\n"
+        "Type: {tx_type}\n\n"
+        "ATO guidance ({tax_year}):\n{ato_context}\n\n"
+        "Step 1 — Could this plausibly be a business expense/income (sole trader activity)?\n"
+        "Step 2 — If not, is it a work-related expense a PAYG salary earner could claim as a "
+        "deduction (per the ATO guidance above)?\n"
+        "Step 3 — Otherwise classify as 'na' (personal/non-deductible).\n"
+    )),
+])
+
+
+async def _classify_tax_kind(state: CategorizationState) -> CategorizationState:
+    category = state.category or "other"
+    static = _STATIC_TAX_KIND.get(category)
+    if static is not None:
+        return state.model_copy(update={"tax_kind": static})
+
+    ato_context = "(no relevant ATO guidance found)"
+    try:
+        from backend.services.rag import search_ato_rules
+        query = f"{category} {state.vendor} {state.description[:100]}".strip()
+        hits = await search_ato_rules(query, year=TAX_YEAR, n_results=3)
+        if hits:
+            ato_context = "\n---\n".join(h["text"] for h in hits)
+    except Exception as e:
+        log.warning("ATO rule lookup failed for '%s': %s", state.vendor, e)
+
+    try:
+        chain = _TAX_KIND_PROMPT | get_llm().with_structured_output(TaxKindResult)
+        result: TaxKindResult = await chain.ainvoke({
+            "vendor": state.vendor,
+            "description": state.description[:300],
+            "category": category,
+            "amount": f"{float(state.amount or 0):.2f}",
+            "tx_type": state.tx_type or "expense",
+            "tax_year": TAX_YEAR,
+            "ato_context": ato_context,
+        })
+        tax_kind = result.tax_kind if result.tax_kind in ("business", "employment", "na") else "na"
+        log.info("Tax kind classify | %s (%s) → %s | %s", state.vendor, category, tax_kind, result.reasoning)
+        return state.model_copy(update={"tax_kind": tax_kind})
+    except Exception as e:
+        log.warning("Tax kind classification failed for '%s': %s", state.vendor, e)
+        return state
 
 
 # ── LCEL pipeline ─────────────────────────────────────────────────────────────
@@ -238,6 +320,7 @@ _pipeline = (
         (_resolved, RunnableLambda(lambda s: s)),
         RunnableLambda(_llm_categorize),
     )
+    | RunnableLambda(_classify_tax_kind)
 )
 
 

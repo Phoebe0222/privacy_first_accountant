@@ -7,6 +7,5 @@
 **/.venv
 **/chroma_db
 **/accountant.db
-**/data
 .git
 *.sh

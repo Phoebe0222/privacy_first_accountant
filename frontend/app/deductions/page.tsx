@@ -50,6 +50,12 @@ export default function DeductionsPage() {
       .finally(() => setAiLoading(false));
   }
 
+  async function handleCarryforwardChange(value: number) {
+    await api.updateDeductionSettings({ user_type: userType, business_loss_carryforward: value });
+    setLoading(true);
+    api.getDeductionsEstimate(year).then(setEstimate).finally(() => setLoading(false));
+  }
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -71,7 +77,7 @@ export default function DeductionsPage() {
         </div>
       </div>
 
-      {tab === "estimate" && (loading ? <p className="text-gray-400">Calculating…</p> : estimate && <EstimateTab estimate={estimate} incomeType={incomeType} />)}
+      {tab === "estimate" && (loading ? <p className="text-gray-400">Calculating…</p> : estimate && <EstimateTab estimate={estimate} incomeType={incomeType} onCarryforwardChange={handleCarryforwardChange} />)}
       {tab === "ai" && (
         aiLoading ? (
           <div className="flex flex-col items-center gap-4 py-16">
@@ -222,7 +228,47 @@ function TaxPosition({ combined, source }: { combined: DeductionsEstimate["combi
   );
 }
 
-function EstimateTab({ estimate, incomeType }: { estimate: DeductionsEstimate; incomeType: string }) {
+function CarryforwardEditor({ balance, onSave }: { balance: number; onSave: (value: number) => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(balance));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setValue(String(balance)); }, [balance]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onSave(parseFloat(value) || 0);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between text-sm gap-2">
+      <span className="text-gray-500">Loss carryforward from prior years</span>
+      {editing ? (
+        <span className="flex items-center gap-2">
+          <div className="relative">
+            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">$</span>
+            <input type="number" min={0} step={0.01} value={value} onChange={(e) => setValue(e.target.value)}
+              className="border border-gray-200 rounded px-2 py-1 pl-5 text-sm w-28" />
+          </div>
+          <button onClick={save} disabled={saving} className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50">Save</button>
+          <button onClick={() => { setEditing(false); setValue(String(balance)); }} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+        </span>
+      ) : (
+        <span className="flex items-center gap-2">
+          <span className="font-medium">{fmt(balance)}</span>
+          <button onClick={() => setEditing(true)} className="text-xs text-blue-500 hover:underline">Edit</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function EstimateTab({ estimate, incomeType, onCarryforwardChange }: { estimate: DeductionsEstimate; incomeType: string; onCarryforwardChange: (value: number) => Promise<void> }) {
   const { combined } = estimate;
   const showEmp = incomeType !== "business";
   const showBiz = incomeType !== "employment";
@@ -262,35 +308,83 @@ function EstimateTab({ estimate, incomeType }: { estimate: DeductionsEstimate; i
       {showCombined && (
         <>
           <hr className="border-gray-100" />
-          <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-3">
+          <div className="bg-gray-50 rounded-xl border border-gray-100 p-5 space-y-4">
             <h3 className="font-semibold text-gray-700">Combined</h3>
             {combined.biz_is_loss ? (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
-                  <span>⚠</span>
-                  <span>Business is in a loss of <strong>{fmt(Math.abs(combined.biz_net))}</strong> — non-commercial loss rules (Div 35) may prevent offsetting this against salary. <a href="https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss" target="_blank" rel="noreferrer" className="underline">ATO guidance →</a></span>
+                  <span className="mt-0.5">⚠</span>
+                  <div className="space-y-1">
+                    <p className="font-medium">Business is in a loss of {fmt(Math.abs(combined.biz_net))} — non-commercial loss rules apply (Div 35 ITAA 1997).</p>
+                    <p>A business loss cannot automatically offset salary income this year. Two scenarios below depending on whether you pass an ATO test.</p>
+                    {combined.ncl_tests_url && (
+                      <a href={combined.ncl_tests_url} target="_blank" rel="noreferrer" className="underline hover:text-amber-900">ATO: Non-commercial loss tests →</a>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Salary taxable (NCL applies)</span>
-                  <span className="font-bold">{fmt(combined.salary_taxable)}</span>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white rounded-lg border border-gray-100 p-4 space-y-2">
+                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Loss deferred (carried forward)</p>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-sm"><span className="text-gray-500">Taxable income</span><span className="font-medium">{fmt(combined.ncl_applies!.taxable_income)}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-gray-500">Est. tax payable</span><span className="font-bold text-red-500">{fmt(combined.ncl_applies!.income_tax)}</span></div>
+                      {combined.payg_withheld > 0 && (
+                        combined.ncl_applies!.tax_owing > 0
+                          ? <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. to pay (after PAYG)</span><span className="font-bold text-red-500">{fmt(combined.ncl_applies!.tax_owing)}</span></div>
+                          : <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. refund (after PAYG)</span><span className="font-bold text-green-600">{fmt(combined.ncl_applies!.tax_refund)}</span></div>
+                      )}
+                      <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">New carryforward balance</span><span className="font-medium">{fmt(combined.ncl_applies!.carryforward_after)}</span></div>
+                    </div>
+                    <p className="text-xs text-gray-400">{combined.ncl_applies!.note}</p>
+                  </div>
+                  <div className="bg-white rounded-lg border border-gray-100 p-4 space-y-2">
+                    <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">NCL test passed (offsets salary now)</p>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-sm"><span className="text-gray-500">Taxable income</span><span className="font-medium">{fmt(combined.ncl_exempt!.taxable_income)}</span></div>
+                      <div className="flex justify-between text-sm"><span className="text-gray-500">Est. tax payable</span><span className="font-bold text-red-500">{fmt(combined.ncl_exempt!.income_tax)}</span></div>
+                      {combined.payg_withheld > 0 && (
+                        combined.ncl_exempt!.tax_owing > 0
+                          ? <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. to pay (after PAYG)</span><span className="font-bold text-red-500">{fmt(combined.ncl_exempt!.tax_owing)}</span></div>
+                          : <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Est. refund (after PAYG)</span><span className="font-bold text-green-600">{fmt(combined.ncl_exempt!.tax_refund)}</span></div>
+                      )}
+                      <div className="flex justify-between text-sm border-t border-gray-100 pt-1"><span className="text-gray-500">Carryforward balance</span><span className="font-medium">{fmt(combined.ncl_exempt!.carryforward_after)}</span></div>
+                    </div>
+                    <p className="text-xs text-gray-400">{combined.ncl_exempt!.note}</p>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div>
-                  <p className="text-xs text-gray-400">Salary taxable</p>
-                  <p className="font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div>
+                    <p className="text-xs text-gray-400">Salary taxable</p>
+                    <p className="font-bold text-gray-800">{fmt(combined.salary_taxable)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Business net{(combined.carryforward_used ?? 0) > 0 ? " (after carryforward)" : ""}</p>
+                    <p className="font-bold text-green-600">{fmt(combined.biz_net_after_carryforward ?? combined.biz_net)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-400">Combined taxable</p>
+                    <p className="font-bold text-gray-800">{fmt(combined.taxable_income ?? 0)}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-400">Business net</p>
-                  <p className="font-bold text-green-600">{fmt(combined.biz_net)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-400">Combined taxable</p>
-                  <p className="font-bold text-gray-800">{fmt(combined.taxable_income ?? 0)}</p>
-                </div>
+                {(combined.carryforward_used ?? 0) > 0 && (
+                  <p className="text-xs text-gray-500">
+                    {fmt(combined.carryforward_used!)} of carried-forward business losses applied against this year&apos;s business profit of {fmt(combined.biz_net)}.
+                    Remaining carryforward: {fmt(combined.carryforward_remaining!)}.
+                  </p>
+                )}
               </div>
             )}
+
+            <div className="border-t border-gray-100 pt-3 space-y-1">
+              <CarryforwardEditor balance={combined.carryforward_balance} onSave={onCarryforwardChange} />
+              <p className="text-xs text-gray-400">
+                Unused business losses deferred from previous years (Div 35 ITAA 1997). Update this from your prior-year tax return.
+              </p>
+            </div>
           </div>
         </>
       )}

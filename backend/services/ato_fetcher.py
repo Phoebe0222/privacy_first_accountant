@@ -38,22 +38,25 @@ CHUNK_OVERLAP = 80
 RULES_DIR = Path(__file__).parent.parent / "data" / "ato_rules"
 
 
-def _parse_file(path: Path) -> tuple[str, str, str]:
-    """Return (category, source_url, body_text) from a rule file."""
+def _parse_file(path: Path) -> tuple[str, str, str, str]:
+    """Return (category, source_url, audience, body_text) from a rule file."""
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
     category = path.stem
     url = ""
+    audience = "both"
     body_start = 0
     for i, line in enumerate(lines):
         if line.startswith("Source:"):
             url = line.split(":", 1)[1].strip()
         elif line.startswith("Category:"):
             category = line.split(":", 1)[1].strip()
+        elif line.startswith("Audience:"):
+            audience = line.split(":", 1)[1].strip()
         elif line.strip() == "" and i < 5:
             body_start = i + 1
     body = "\n".join(lines[body_start:]).strip()
-    return category, url, body
+    return category, url, audience, body
 
 
 def _chunk(text: str) -> list[str]:
@@ -89,7 +92,7 @@ def _wait_for_ollama(retries: int = 12, delay: int = 10):
     sys.exit(1)
 
 
-def main(year: str):
+def main(year: str, force: bool = False):
     rules_path = RULES_DIR / year
     if not rules_path.exists():
         log.error("No rules directory found at %s", rules_path)
@@ -108,14 +111,17 @@ def main(year: str):
     # Idempotency check
     existing = col.get(where={"year": year}, limit=1)
     if existing["ids"]:
-        log.info("ATO rules for %s already indexed (%d docs total) — skipping", year, col.count())
-        return
+        if not force:
+            log.info("ATO rules for %s already indexed (%d docs total) — skipping", year, col.count())
+            return
+        log.info("Re-indexing: deleting existing %s docs before re-adding", year)
+        col.delete(where={"year": year})
 
     log.info("Indexing %d ATO rule files for %s", len(rule_files), year)
 
     total_chunks = 0
     for path in rule_files:
-        category, url, body = _parse_file(path)
+        category, url, audience, body = _parse_file(path)
         chunks = _chunk(body)
         log.info("  %-20s → %d chunks  (%s)", category, len(chunks), path.name)
 
@@ -130,7 +136,7 @@ def main(year: str):
                 ids=[f"ato_{year}_{category}_{i}"],
                 embeddings=[embedding],
                 documents=[chunk],
-                metadatas=[{"year": year, "category": category, "url": url, "chunk_index": i}],
+                metadatas=[{"year": year, "category": category, "url": url, "audience": audience, "chunk_index": i}],
             )
             total_chunks += 1
 
@@ -140,5 +146,6 @@ def main(year: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", default="2025-2026")
+    parser.add_argument("--force", action="store_true", help="Delete and re-index existing docs for this year")
     args = parser.parse_args()
-    main(args.year)
+    main(args.year, force=args.force)

@@ -222,9 +222,9 @@ export const api = {
 
   // ── Tax profile settings ─────────────────────────────────────────────────
   getTaxProfile: () =>
-    req<{ income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number }>("/settings/tax-profile"),
-  updateTaxProfile: (data: { income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number }) =>
-    req<{ income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number }>("/settings/tax-profile", {
+    req<{ income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number; private_hospital_cover: boolean }>("/settings/tax-profile"),
+  updateTaxProfile: (data: { income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number; private_hospital_cover: boolean }) =>
+    req<{ income_type: string; gst_registered: boolean; gross_salary: number; payg_withheld: number; private_hospital_cover: boolean }>("/settings/tax-profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -232,11 +232,11 @@ export const api = {
 
   // ── Deductions ──────────────────────────────────────────────────────────
 
-  getDeductionSettings: () => req<{ user_type: string }>("/deductions/settings"),
-  updateDeductionSettings: (user_type: string) =>
-    req<{ user_type: string }>("/deductions/settings", {
+  getDeductionSettings: () => req<{ user_type: string; business_loss_carryforward: number }>("/deductions/settings"),
+  updateDeductionSettings: (data: { user_type: string; business_loss_carryforward?: number }) =>
+    req<{ user_type: string; business_loss_carryforward: number }>("/deductions/settings", {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_type }),
+      body: JSON.stringify(data),
     }),
   getDeductionRules: (user_type: string) =>
     req<DeductionRule[]>(`/deductions/rules?user_type=${user_type}`),
@@ -336,6 +336,15 @@ export interface DeductionsEstimate {
     payg_withheld: number;
     tax_owing: number;
     tax_refund: number;
+    carryforward_balance: number;
+    // profitable path — carryforward applied against this year's business profit
+    carryforward_used?: number;
+    carryforward_remaining?: number;
+    biz_net_after_carryforward?: number;
+    // loss path (NCL rules) — defer (added to carryforward) vs. offset salary now
+    ncl_applies?: { taxable_income: number; income_tax: number; tax_owing: number; tax_refund: number; carryforward_after: number; note: string };
+    ncl_exempt?: { taxable_income: number; income_tax: number; tax_owing: number; tax_refund: number; carryforward_after: number; note: string };
+    ncl_tests_url?: string;
   };
   total_deductible: number;
   total_expenses: number;

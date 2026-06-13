@@ -5,43 +5,33 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal, get_db, _DEDUCTION_SEEDS
 from backend.models import AppSettings, DeductionRule, Transaction
+from backend.services.tax_calculate import calc_tax
 
 router = APIRouter(prefix="/deductions", tags=["deductions"])
 
 _PRIMARY_SOURCES = ("bank_csv", "manual")
 VALID_USER_TYPES = ("individual_salary", "individual_abn", "small_business")
 
-_TAX_BRACKETS = [
-    (18_200,       0.00, 0),
-    (45_000,       0.16, 18_200),
-    (135_000,      0.30, 45_000),
-    (190_000,      0.37, 135_000),
-    (float("inf"), 0.45, 190_000),
-]
-
-
-def _calc_tax(taxable_income: float) -> float:
-    if taxable_income <= 0:
-        return 0.0
-    tax = 0.0
-    for threshold, rate, base in _TAX_BRACKETS:
-        if taxable_income <= threshold:
-            tax += (taxable_income - base) * rate
-            break
-    lito = max(0.0, 700.0 - max(0.0, taxable_income - 37_500) * 0.05)
-    return max(0.0, round(tax - lito + taxable_income * 0.02, 2))
-
 
 # ── Settings ──────────────────────────────────────────────────────────────────
+
+def _get_carryforward(db: Session) -> float:
+    row = db.get(AppSettings, "business_loss_carryforward")
+    return float(row.value) if row and row.value else 0.0
+
 
 @router.get("/settings")
 def get_settings(db: Session = Depends(get_db)):
     row = db.get(AppSettings, "user_type")
-    return {"user_type": row.value if row else "small_business"}
+    return {
+        "user_type": row.value if row else "small_business",
+        "business_loss_carryforward": _get_carryforward(db),
+    }
 
 
 class SettingsUpdate(BaseModel):
     user_type: str
+    business_loss_carryforward: Optional[float] = None
 
 
 @router.put("/settings")
@@ -53,8 +43,17 @@ def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
         row.value = body.user_type
     else:
         db.add(AppSettings(key="user_type", value=body.user_type))
+
+    if body.business_loss_carryforward is not None:
+        cf_value = max(0.0, body.business_loss_carryforward)
+        cf_row = db.get(AppSettings, "business_loss_carryforward")
+        if cf_row:
+            cf_row.value = str(cf_value)
+        else:
+            db.add(AppSettings(key="business_loss_carryforward", value=str(cf_value)))
+
     db.commit()
-    return {"user_type": body.user_type}
+    return {"user_type": body.user_type, "business_loss_carryforward": _get_carryforward(db)}
 
 
 # ── Rules CRUD ────────────────────────────────────────────────────────────────
@@ -201,6 +200,9 @@ def estimate(year: int, db: Session = Depends(get_db)):
     payg_withheld_row = db.get(AppSettings, "payg_withheld")
     payg_withheld_setting = float(payg_withheld_row.value) if payg_withheld_row and payg_withheld_row.value else 0.0
 
+    phi_row = db.get(AppSettings, "private_hospital_cover")
+    has_private_hospital_cover = (phi_row.value == "true") if phi_row else False
+
     biz_income  = sum(t.amount or 0 for t in _txs("business",    "income", "sales"))
     tx_emp_income = sum(t.amount or 0 for t in _txs("employment", "income", "salary"))
     emp_income  = gross_salary_setting if gross_salary_setting > 0 else tx_emp_income
@@ -211,12 +213,56 @@ def estimate(year: int, db: Session = Depends(get_db)):
     biz_net    = round(biz_income - business["total_deductible"], 2)
     biz_is_loss = biz_net < 0
 
+    carryforward_balance = _get_carryforward(db)
+    combined_extra: dict = {"carryforward_balance": round(carryforward_balance, 2)}
+
     if biz_is_loss:
+        # A business loss can't automatically offset salary income (Div 35 ITAA 1997 —
+        # non-commercial loss rules). Show both possible outcomes:
+        #  - ncl_applies: loss is deferred and added to the carryforward balance
+        #  - ncl_exempt:  an NCL test is passed, so the loss offsets salary this year
+        taxable_ncl_applies = employment["taxable_income"]
+        taxable_ncl_exempt  = max(0.0, round(employment["taxable_income"] + biz_net, 2))
+        tax_ncl_applies = calc_tax(taxable_ncl_applies, has_private_hospital_cover)
+        tax_ncl_exempt  = calc_tax(taxable_ncl_exempt, has_private_hospital_cover)
+
         combined_taxable = None
-        income_tax = _calc_tax(employment["taxable_income"])
+        income_tax = tax_ncl_applies
+
+        combined_extra.update({
+            "ncl_applies": {
+                "taxable_income":     taxable_ncl_applies,
+                "income_tax":         tax_ncl_applies,
+                "tax_owing":          round(max(0.0, tax_ncl_applies - payg_withheld_setting), 2),
+                "tax_refund":         round(max(0.0, payg_withheld_setting - tax_ncl_applies), 2),
+                "carryforward_after": round(carryforward_balance + abs(biz_net), 2),
+                "note": "Business loss deferred — added to your loss carryforward balance to offset future business profits. Applies unless you meet the income requirement (taxable income, reportable fringe benefits, reportable super contributions and net investment losses, excluding this business loss, under $250,000) and pass one of the four non-commercial loss tests.",
+            },
+            "ncl_exempt": {
+                "taxable_income":     taxable_ncl_exempt,
+                "income_tax":         tax_ncl_exempt,
+                "tax_owing":          round(max(0.0, tax_ncl_exempt - payg_withheld_setting), 2),
+                "tax_refund":         round(max(0.0, payg_withheld_setting - tax_ncl_exempt), 2),
+                "carryforward_after": round(carryforward_balance, 2),
+                "note": "If your income (excluding this business loss) is under $250,000 and you pass one of the four NCL tests (assessable income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k), this year's loss offsets your salary immediately instead of being carried forward.",
+            },
+            "ncl_tests_url": "https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss",
+        })
     else:
-        combined_taxable = max(0.0, round(employment["taxable_income"] + biz_net, 2))
-        income_tax = _calc_tax(combined_taxable)
+        # Apply any losses carried forward from previous years against this year's
+        # business profit before combining with salary.
+        carryforward_used      = round(min(biz_net, carryforward_balance), 2)
+        biz_net_after_cf       = round(biz_net - carryforward_used, 2)
+        carryforward_remaining = round(carryforward_balance - carryforward_used, 2)
+
+        combined_taxable = max(0.0, round(employment["taxable_income"] + biz_net_after_cf, 2))
+        income_tax = calc_tax(combined_taxable, has_private_hospital_cover)
+
+        combined_extra.update({
+            "carryforward_used":          carryforward_used,
+            "carryforward_remaining":     carryforward_remaining,
+            "biz_net_after_carryforward": biz_net_after_cf,
+        })
 
     return {
         "year": year,
@@ -236,6 +282,7 @@ def estimate(year: int, db: Session = Depends(get_db)):
             "payg_withheld": payg_withheld_setting,
             "tax_owing": round(max(0.0, income_tax - payg_withheld_setting), 2),
             "tax_refund": round(max(0.0, payg_withheld_setting - income_tax), 2),
+            **combined_extra,
         },
         "total_deductible": round(business["total_deductible"] + employment["total_deductible"], 2),
         "total_expenses": round(business["total_expenses"] + employment["total_expenses"], 2),

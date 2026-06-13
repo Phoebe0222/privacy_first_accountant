@@ -16,37 +16,11 @@ from pydantic import BaseModel, Field
 from langchain_core.prompts import ChatPromptTemplate
 
 from backend.services.utils import get_llm
+from backend.services.tax_calculate import calc_tax
 
 log = logging.getLogger(__name__)
 
 CHAT_MODEL = os.getenv("CHAT_MODEL", "qwen2.5:7b")
-
-# ── Australian tax brackets (Stage 3, effective FY2024-25 onward) ─────────────
-
-_BRACKETS = [
-    (18_200,       0.00, 0),
-    (45_000,       0.16, 18_200),
-    (135_000,      0.30, 45_000),
-    (190_000,      0.37, 135_000),
-    (float("inf"), 0.45, 190_000),
-]
-_LOW_INCOME_OFFSET_MAX = 700
-# TODO: medicare levy surcharge only applies for high-income earners without private health insurance
-# add an option in the tax settings and adjust the calculation accordingly
-_MEDICARE = 0.02
-
-
-def _calc_tax(taxable_income: float) -> float:
-    if taxable_income <= 0:
-        return 0.0
-    tax = 0.0
-    for threshold, rate, base in _BRACKETS:
-        if taxable_income <= threshold:
-            tax += (taxable_income - base) * rate
-            break
-    lito = max(0, _LOW_INCOME_OFFSET_MAX - max(0, taxable_income - 37_500) * 0.05)
-    medicare = max(0, taxable_income * _MEDICARE)
-    return max(0, round(tax - lito + medicare, 2))
 
 
 # ── Deductibility assessment via LLM + ATO RAG ────────────────────────────────
@@ -114,7 +88,7 @@ async def _assess_category_group(
             f"Is {cat.replace('_', ' ')} deductible for Australian "
             f"{'employee' if taxpayer_type == 'salary' else 'small business'}?"
         )
-        ato_results = await rag.search_ato_rules(query, year=ato_year, n_results=3)
+        ato_results = await rag.search_ato_rules(query, year=ato_year, n_results=3, audience=taxpayer_type)
         ato_context = "\n\n".join(r["text"] for r in ato_results)
         ato_urls    = list({r["url"] for r in ato_results if r["url"]})
 
@@ -170,6 +144,9 @@ async def run_tax_estimate(year: int, db) -> dict:
 
     payg_withheld_row = db.get(AppSettings, "payg_withheld")
     payg_withheld_setting = float(payg_withheld_row.value) if payg_withheld_row and payg_withheld_row.value else 0.0
+
+    phi_row = db.get(AppSettings, "private_hospital_cover")
+    has_private_hospital_cover = (phi_row.value == "true") if phi_row else False
 
     def _tax_excl(t) -> float:
         """Return GST-exclusive amount for business transactions when GST registered."""
@@ -242,6 +219,13 @@ async def run_tax_estimate(year: int, db) -> dict:
     biz_net = round(biz_income - biz_deductible, 2)
     biz_is_loss = biz_net < 0
 
+    medicare_note = (
+        "2% Medicare levy (Medicare Levy Surcharge exempt — private hospital cover)"
+        if has_private_hospital_cover
+        else "2% Medicare levy + Medicare Levy Surcharge (1–1.5% if income exceeds threshold, no private hospital cover)"
+    )
+    tax_brackets_note = f"Stage 3 (FY2024-25+): 0/16/30/37/45% + {medicare_note}"
+
     if biz_is_loss:
         # Business is in loss — cannot automatically offset salary.
         # Scenario A: NCL rules apply → only salary taxable, loss deferred.
@@ -249,8 +233,8 @@ async def run_tax_estimate(year: int, db) -> dict:
         taxable_ncl_applies  = salary_taxable                            # loss deferred
         taxable_ncl_exempt   = max(0.0, round(salary_taxable + biz_net, 2))  # loss offsets
 
-        ncl_applies_tax = _calc_tax(taxable_ncl_applies)
-        ncl_exempt_tax  = _calc_tax(taxable_ncl_exempt)
+        ncl_applies_tax = calc_tax(taxable_ncl_applies, has_private_hospital_cover)
+        ncl_exempt_tax  = calc_tax(taxable_ncl_exempt, has_private_hospital_cover)
         combined = {
             "salary_taxable":        salary_taxable,
             "biz_net":               biz_net,
@@ -271,12 +255,12 @@ async def run_tax_estimate(year: int, db) -> dict:
                 "note":              "If your income (excluding this business loss) is under $250,000 and you pass one of the four NCL tests (income ≥ $20k, 3-of-5 profit years, real property ≥ $500k, other assets ≥ $100k), the loss can offset your salary.",
             },
             "ncl_tests_url":         "https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss",
-            "tax_brackets":          "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
+            "tax_brackets":          tax_brackets_note,
         }
     else:
         # Business is profitable — combine normally.
         combined_taxable = round(salary_taxable + biz_taxable, 2)
-        estimated_tax    = _calc_tax(combined_taxable)
+        estimated_tax    = calc_tax(combined_taxable, has_private_hospital_cover)
         combined = {
             "salary_taxable":        salary_taxable,
             "biz_net":               biz_net,
@@ -286,7 +270,7 @@ async def run_tax_estimate(year: int, db) -> dict:
             "payg_withheld":         payg_withheld_setting,
             "tax_owing":             round(max(0.0, estimated_tax - payg_withheld_setting), 2),
             "tax_refund":            round(max(0.0, payg_withheld_setting - estimated_tax), 2),
-            "tax_brackets":          "Stage 3 (FY2024-25+): 0/16/30/37/45% + 2% Medicare",
+            "tax_brackets":          tax_brackets_note,
         }
 
     return {

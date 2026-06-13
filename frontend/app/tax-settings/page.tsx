@@ -19,6 +19,7 @@ export default function TaxSettingsPage() {
   const [gstRegistered, setGstRegistered] = useState(false);
   const [grossSalary, setGrossSalary]     = useState("");
   const [paygWithheld, setPaygWithheld]   = useState("");
+  const [privateHospitalCover, setPrivateHospitalCover] = useState(false);
   const [saved, setSaved]                 = useState(false);
   const [loading, setLoading]             = useState(true);
 
@@ -28,6 +29,7 @@ export default function TaxSettingsPage() {
       setGstRegistered(p.gst_registered);
       setGrossSalary(p.gross_salary > 0 ? String(p.gross_salary) : "");
       setPaygWithheld(p.payg_withheld > 0 ? String(p.payg_withheld) : "");
+      setPrivateHospitalCover(p.private_hospital_cover);
     }).finally(() => setLoading(false));
   }, []);
 
@@ -37,6 +39,7 @@ export default function TaxSettingsPage() {
       gst_registered: gstRegistered,
       gross_salary:   parseFloat(grossSalary) || 0,
       payg_withheld:  parseFloat(paygWithheld) || 0,
+      private_hospital_cover: privateHospitalCover,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -176,6 +179,24 @@ export default function TaxSettingsPage() {
           )}
         </div>
       )}
+
+      {/* Medicare Levy Surcharge — depends on private hospital cover */}
+      <div className="space-y-3">
+        <h3 className="font-semibold text-gray-700">Medicare Levy Surcharge</h3>
+        <label className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition-colors ${
+          privateHospitalCover ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-white hover:bg-gray-50"
+        }`}>
+          <input type="checkbox" checked={privateHospitalCover}
+            onChange={(e) => setPrivateHospitalCover(e.target.checked)} className="mt-0.5" />
+          <div>
+            <p className="font-medium text-gray-800 text-sm">I have an appropriate level of private hospital cover</p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              If checked, the Medicare Levy Surcharge (an extra 1–1.5% for high-income earners without
+              private hospital cover) is not added to your tax estimate. Extras-only cover doesn&apos;t count.
+            </p>
+          </div>
+        </label>
+      </div>
 
       {/* Scenario summary */}
       <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-1 text-xs text-gray-600">

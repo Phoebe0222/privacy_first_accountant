@@ -3,6 +3,7 @@ import httpx
 import os
 import chromadb
 from pathlib import Path
+from typing import Optional
 from bs4 import BeautifulSoup
 
 log = logging.getLogger(__name__)
@@ -93,16 +94,19 @@ _ato_col = _client.get_or_create_collection(
 )
 
 
-def _parse_seed_header(path: Path) -> tuple[str, str]:
-    """Return (category, source_url) from a seed ATO rule file's header lines."""
+def _parse_seed_header(path: Path) -> tuple[str, str, str]:
+    """Return (category, source_url, audience) from a seed ATO rule file's header lines."""
     category = path.stem
     url = ""
+    audience = "both"
     for line in path.read_text(encoding="utf-8").splitlines()[:5]:
         if line.startswith("Source:"):
             url = line.split(":", 1)[1].strip()
         elif line.startswith("Category:"):
             category = line.split(":", 1)[1].strip()
-    return category, url
+        elif line.startswith("Audience:"):
+            audience = line.split(":", 1)[1].strip()
+    return category, url, audience
 
 
 async def _fetch_page_text(url: str) -> str:
@@ -118,7 +122,7 @@ async def _fetch_page_text(url: str) -> str:
     return main.get_text(separator="\n", strip=True)
 
 
-async def _index_live_page(url: str, category: str, year: str) -> int:
+async def _index_live_page(url: str, category: str, year: str, audience: str = "both") -> int:
     """Fetch a live ATO page, chunk it, embed each chunk, and upsert into the ato_rules collection."""
     from backend.services.ato_fetcher import _chunk
     text = await _fetch_page_text(url)
@@ -129,7 +133,7 @@ async def _index_live_page(url: str, category: str, year: str) -> int:
             ids=[f"ato_live_{year}_{category}_{i}"],
             embeddings=[embedding],
             documents=[chunk],
-            metadatas=[{"year": year, "category": category, "url": url, "source": "live"}],
+            metadatas=[{"year": year, "category": category, "url": url, "audience": audience, "source": "live"}],
         )
     return len(chunks)
 
@@ -150,24 +154,33 @@ async def ensure_live_ato_rules(year: str = "2025-2026") -> int:
 
     total = 0
     for path in sorted(rules_dir.glob("*.txt")):
-        category, url = _parse_seed_header(path)
+        category, url, audience = _parse_seed_header(path)
         if not url:
             continue
         try:
-            total += await _index_live_page(url, category, year)
+            total += await _index_live_page(url, category, year, audience)
         except Exception as e:
             log.warning("Live ATO fetch failed for %s (%s): %s", category, url, e)
     return total
 
 
-async def search_ato_rules(query: str, year: str = "2025-2026", n_results: int = 5) -> list[dict]:
-    """Search the ATO rules collection. Live-fetches and indexes ATO pages on first use for `year`."""
+async def search_ato_rules(query: str, year: str = "2025-2026", n_results: int = 5, audience: Optional[str] = None) -> list[dict]:
+    """
+    Search the ATO rules collection. Live-fetches and indexes ATO pages on first use for `year`.
+    `audience`, if given ("salary" or "business"), restricts results to rules tagged for that
+    audience or for "both" — e.g. excludes GST/non-commercial-loss rules from salary queries.
+    """
     if year:
         await ensure_live_ato_rules(year)
     if _ato_col.count() == 0:
         return []
     embedding = await _embed(query)
-    where = {"year": year} if year else None
+    conditions = []
+    if year:
+        conditions.append({"year": year})
+    if audience:
+        conditions.append({"audience": {"$in": [audience, "both"]}})
+    where = {"$and": conditions} if len(conditions) > 1 else (conditions[0] if conditions else None)
     results = _ato_col.query(
         query_embeddings=[embedding],
         n_results=min(n_results, _ato_col.count()),
