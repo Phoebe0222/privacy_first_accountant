@@ -1,0 +1,42 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/gst-excise-and-indirect-taxes/gst
+Category: gst_overview
+Tax Year: 2025-2026
+Audience: business
+
+GST — Goods and Services Tax
+
+Registration:
+You must register for GST if your business has a GST turnover of $75,000 or more (or $150,000 for non-profit organisations).
+If your turnover is below $75,000, registration is optional but recommended if you make taxable supplies.
+Ride-share and taxi drivers must register regardless of turnover.
+
+GST rate: 10% on taxable supplies.
+
+GST-free supplies (no GST charged, but input tax credits can still be claimed):
+- Basic food (fresh food, bread, milk — but not restaurant meals or hot food)
+- Medical, health, and educational services
+- Exports of goods and services
+- Childcare
+- Water, sewerage, and sewerage
+
+Input-taxed supplies (no GST charged, no input tax credits on related costs):
+- Financial supplies (lending money, issuing shares)
+- Residential rent
+- Selling residential property (under certain conditions)
+
+Claiming input tax credits (ITCs):
+You can claim ITCs for the GST included in business purchases if:
+- You are registered for GST.
+- The purchase is used for your business (taxable) activities.
+- You hold a tax invoice for purchases over $82.50 (GST-inclusive).
+
+Tax invoices must include: supplier's ABN, description of the supply, GST amount (or statement that price includes GST), date, and total price.
+
+BAS lodgement:
+Report GST collected (1A) and ITCs claimed (1B) on your Business Activity Statement.
+Net GST payable = 1A − 1B.
+Lodge quarterly (or monthly if elected) by the due date — typically 28 days after the quarter ends.
+
+Simplified GST accounting methods for small business:
+- Business norms method: estimate the business-use percentage based on ATO-published norms.
+- Snapshot method: calculate actual business use over a representative period.

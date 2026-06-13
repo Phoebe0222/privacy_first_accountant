@@ -1,0 +1,29 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/offset-or-defer-the-loss-individuals-or-sole-traders
+Category: non_commercial_losses_offset_defer
+Tax Year: 2025-2026
+Audience: business
+
+Offsetting or Deferring a Business Loss (Individuals and Sole Traders)
+
+Step 1 — Check the income requirement:
+Add up your taxable income (excluding the business loss itself), reportable fringe benefits, reportable super contributions, and net investment losses. If this total is $250,000 or more, you cannot offset the loss against other income this year — it must be deferred, regardless of the tests below.
+
+Step 2 — If under $250,000, check the four non-commercial loss tests for that business activity (passing any ONE is enough):
+1. Assessable income test — business assessable income is $20,000 or more.
+2. Profits test — the activity produced a profit in 3 of the last 5 income years (including the current year).
+3. Real property test — real property, or an interest in real property, used on a continuing basis in the business activity is worth $500,000 or more.
+4. Other assets test — certain other assets used on a continuing basis in the business activity are worth $100,000 or more.
+
+How to offset (if you pass a test):
+Claim the business loss as a deduction against your other income (e.g. salary) directly in your tax return for that business activity, for that income year.
+
+How to defer (if you fail all tests and the Commissioner hasn't exercised discretion):
+The loss is "quarantined" to that business activity — it is not deducted against your other income this year. Carry it forward; it can be deducted in a future year against:
+(a) profit from the same business activity, or
+(b) your other income in a future year, if you pass one of the four tests in that later year.
+
+Claiming losses from previous years:
+A previously deferred loss automatically offsets profit from the same activity in a later year once that activity becomes profitable. If you pass a non-commercial loss test in a later year, you can also choose to offset the carried-forward loss against your other income in that year.
+
+Commissioner's discretion:
+May apply if the business activity was affected by special circumstances outside your control (e.g. drought, flood, fire) for that test, or if the activity is in its commercial development phase and, for objective reasons specific to that industry, would not normally satisfy a test within the timeframes used.

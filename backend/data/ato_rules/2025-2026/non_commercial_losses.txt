@@ -1,0 +1,37 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses/non-commercial-losses/what-is-a-non-commercial-loss
+Category: non_commercial_losses
+Tax Year: 2025-2026
+Audience: business
+
+Non-Commercial Losses — Division 35 ITAA 1997
+
+A non-commercial loss arises when your business activity makes a loss (deductions exceed income) and the activity is carried on by an individual, either alone or in partnership.
+
+By default, you CANNOT offset a non-commercial loss against your other income (e.g. salary, wages, investment income) in the same income year. The loss is deferred and carried forward to offset future profits from the same activity.
+
+Exception — you can offset the loss if you pass one of the four tests:
+
+1. Assessable income test
+   Your business produces assessable income of at least $20,000 in the income year.
+
+2. Profit test
+   Your business produced a profit in 3 of the past 5 income years (including the current year).
+
+3. Real property test
+   Your business uses real property (or an interest in real property) with an unencumbered value of at least $500,000.
+
+4. Other property test
+   Your business uses other assets (not real property) with an unencumbered value of at least $100,000.
+
+If you fail all four tests:
+   - The loss is deferred (not wasted) — carried forward to offset future income from the same business activity.
+   - You may still be able to offset if the Commissioner exercises discretion (e.g. because of exceptional circumstances outside your control).
+
+Special rules:
+   - Primary production and professional arts businesses have modified rules.
+   - If your adjusted taxable income exceeds $250,000, the non-commercial loss rules do not apply and you can offset the loss against other income normally.
+   - Partnership losses: if the activity is carried on through a partnership, each partner applies the tests to their share of the loss.
+
+Implication for tax estimates:
+   - If your business income > business deductions: profit can be combined with employment income normally.
+   - If your business income < business deductions (a loss): do NOT automatically offset the loss against salary/wages — apply the four tests first. If none pass, the taxable income is your employment income only, and the business loss is deferred.

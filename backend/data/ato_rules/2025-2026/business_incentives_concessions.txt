@@ -1,0 +1,27 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/incentives-and-concessions
+Category: business_incentives_concessions
+Tax Year: 2025-2026
+Audience: business
+
+Incentives and Concessions for Business — Overview
+
+Most business incentives and concessions are tiered by "aggregated turnover" — your annual turnover plus the annual turnover of any business entities connected with or affiliated to you. Each concession has its own threshold, so check eligibility individually rather than assuming one small-business threshold applies across the board.
+
+Key categories:
+
+1. Small business concessions (generally aggregated turnover under $10 million):
+- Simplified depreciation rules — instant asset write-off for eligible assets, and pooling of other depreciating assets in the small business pool.
+- Simplified trading stock rules — can estimate closing stock value if it changed by less than $5,000 from the start of the year.
+- Simplified GST accounting methods, and PAYG instalment concessions.
+- Small business income tax offset (see dedicated file).
+
+2. CGT concessions for small business (generally aggregated turnover under $2 million, or net assets under $6 million, plus other conditions):
+- 15-year exemption, 50% active asset reduction, retirement exemption, and small business rollover — can significantly reduce or defer capital gains tax on the sale of active business assets.
+
+3. Research and development (R&D) tax incentive:
+- A tax offset for eligible R&D activities — a higher refundable offset for companies with aggregated turnover under $20 million, and a non-refundable offset for larger companies, both calculated as a premium on top of the company tax rate.
+
+4. Industry/activity-specific concessions:
+- Primary producer income averaging and farm management deposits.
+- Fuel tax credits and energy incentives.
+- Other time-limited incentives announced in federal budgets — these change frequently, so confirm current availability for 2025-26.

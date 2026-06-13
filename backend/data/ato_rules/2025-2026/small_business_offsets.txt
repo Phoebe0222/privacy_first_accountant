@@ -1,0 +1,21 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/income-and-deductions-for-business/concessions-offsets-and-rebates
+Category: small_business_offsets
+Tax Year: 2025-2026
+Audience: business
+
+Small Business Income Tax Offset and Digital Games Tax Offset
+
+Small business income tax offset (unincorporated small business tax offset):
+- Available to individuals — sole traders, and partners or beneficiaries who receive a share of small business income through a partnership or trust — where the business has an aggregated turnover under $5 million.
+- The offset equals 16% of the tax payable on your "total net small business income" (your share of business income, less deductions attributable to it).
+- Capped at $1,000 per individual per year.
+- Calculated automatically by the ATO from your tax return — no separate application required. Non-refundable (reduces tax payable to a minimum of $0).
+- Does NOT apply to companies — companies instead benefit from the lower "base rate entity" company tax rate, where eligible.
+
+Digital games tax offset:
+- A refundable tax offset for companies that carry out eligible digital game development activities in Australia.
+- Offset = 30% of eligible Qualifying Australian Development Expenditure (QADE), subject to a minimum spend threshold and an annual cap per company/game.
+- Requires a certificate confirming the game qualifies (from the relevant government cultural body) before claiming via the company tax return.
+- Niche concession — only relevant to companies in digital game development; not applicable to most sole traders or small businesses.
+
+Other concessions, offsets and rebates (covered separately or on the ATO concessions overview page) include small business restructure rollover relief, small business CGT concessions, and various industry-specific rebates — these are added or changed periodically, so check current availability for 2025-26.

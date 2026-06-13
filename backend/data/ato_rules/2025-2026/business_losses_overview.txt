@@ -1,0 +1,22 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/losses
+Category: business_losses_overview
+Tax Year: 2025-2026
+Audience: business
+
+Business (Tax) Losses — Overview
+
+A business or tax loss arises when your allowable deductions for an income year exceed your assessable income for that year.
+
+How a loss is treated depends on your business structure:
+- Sole traders and individual partners: a business loss may be offset against your other assessable income (e.g. salary or wages) in the same year — but only if you satisfy the non-commercial loss rules (below). Otherwise, the loss is deferred ("quarantined") and carried forward to offset future profits from the same business activity.
+- Companies: losses are carried forward within the company and can generally be deducted against future income, subject to passing the "continuity of ownership test" or "similar business test" if ownership or control has changed.
+- Trusts and partnerships: special trust loss rules apply at the trust level; partners account for their share of a partnership loss individually.
+
+Non-commercial loss rules (Div 35 ITAA 1997) — for individuals/sole traders (including in partnership):
+You generally cannot offset a business loss against your salary or other income in the year it arises unless:
+- Your "income requirement" is met — your taxable income (excluding the loss itself), reportable fringe benefits, and reportable super contributions total under $250,000, AND
+- You pass one of four tests for that business activity: assessable income test (≥$20,000), profits test (profit in 3 of the last 5 years), real property test (≥$500,000 of real property used in the business), or other assets test (≥$100,000 of other assets used in the business) — or the Commissioner exercises discretion (e.g. special circumstances like a natural disaster, or the business is still in its commercial development phase).
+
+For the step-by-step process of deciding whether to offset now or defer, and how to claim a previously deferred loss, see the dedicated guidance on offsetting or deferring business losses.
+
+Carrying forward a deferred loss: it remains attached to that specific business activity and can be deducted against future profits from it, or against your other income in a later year if you then pass one of the four tests.

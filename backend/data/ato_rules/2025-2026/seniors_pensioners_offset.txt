@@ -1,0 +1,19 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/seniors-and-pensioners-tax-offset
+Category: seniors_pensioners_offset
+Tax Year: 2025-2026
+Audience: both
+
+Seniors and Pensioners Tax Offset (SAPTO)
+
+SAPTO can reduce the tax you pay if you are eligible for, or receive, certain Australian government pensions or allowances and meet an income test.
+
+Eligibility test — you must meet BOTH of these:
+1. Age/payment requirement — you are of Age Pension age, or you receive an eligible government payment (e.g. an Australian Government age pension, service pension, or income support supplement from Centrelink or the Department of Veterans' Affairs).
+2. Income test — your "rebate income" (taxable income + reportable super contributions + total net investment losses + adjusted fringe benefits) must be below the relevant threshold for your situation (single, member of a couple, or member of an illness-separated couple). The thresholds and maximum offset amounts are indexed — confirm the current 2025-26 figures.
+
+How it's applied:
+- SAPTO is non-refundable — it reduces tax payable to a minimum of $0; unused amounts are not refunded.
+- If you are eligible for SAPTO, it can also reduce or completely eliminate your Medicare levy liability.
+- The ATO generally calculates SAPTO automatically from information in your tax return and data reported by Centrelink/DVA, provided you've indicated your eligibility (e.g. answered the relevant questions in your return).
+
+If you don't meet the age/payment requirement (e.g. you are still working and below pension age with no eligible government payment), you are not entitled to SAPTO even if your income is low — in that case, the Low Income Tax Offset may still apply.

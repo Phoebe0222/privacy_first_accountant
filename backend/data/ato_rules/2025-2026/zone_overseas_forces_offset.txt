@@ -1,0 +1,18 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/zone-or-overseas-forces-tax-offsets
+Category: zone_overseas_forces_offset
+Tax Year: 2025-2026
+Audience: salary
+
+Zone and Overseas Forces Tax Offsets
+
+Zone tax offset:
+- Available if your usual place of residence was in a remote area of Australia designated by the ATO as "Zone A", "Zone B", or a "special area" within those zones.
+- Eligibility generally requires you lived or worked in the zone for more than 183 days in the income year — or, if you didn't reach 183 days in any single year, the days can be added together across the current and immediately preceding income years to reach 183 days.
+- The offset amount depends on which zone applies (Zone A is higher than Zone B, and special areas attract a higher amount again) and whether you have eligible dependants.
+- Check the ATO's zone list (by postcode/locality) for the current year, as zone boundaries and special-area listings can be updated.
+
+Overseas forces tax offset:
+- Available to Australian Defence Force and Federal Police personnel deployed on an eligible overseas operation (as declared by the relevant Minister), calculated per day of eligible service.
+- Income earned for service on some eligible operations may also be exempt from income tax entirely under a separate exemption (in which case the offset doesn't apply to that income, since it's not taxed in the first place).
+
+Both offsets are claimed through your tax return and are non-refundable.

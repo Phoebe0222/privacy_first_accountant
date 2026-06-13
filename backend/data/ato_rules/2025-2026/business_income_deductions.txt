@@ -1,0 +1,27 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/income-and-deductions-for-business/deductions
+Category: business_income_deductions
+Tax Year: 2025-2026
+Audience: business
+
+Business Income and Deductions — Overview
+
+General deduction test (s8-1 ITAA 1997): a business expense is deductible if it is incurred in gaining or producing your assessable income, or necessarily incurred in carrying on your business for that purpose — and it is not capital, private/domestic, or related to earning exempt or non-assessable income.
+
+Common deductible business expenses:
+- Operating expenses: rent, utilities, wages and salaries, employer super contributions, insurance, repairs and maintenance, advertising and marketing, professional/legal/accounting fees, bank fees, interest on business loans.
+- Trading stock (cost of goods sold).
+- Motor vehicle expenses for business travel.
+- Running costs for a home-based business (apportioned for business use).
+- Software and digital product subscriptions used for the business.
+
+Working out taxable income:
+Assessable income − allowable deductions = taxable income.
+- Assessable income includes ordinary income from business operations (sales, fees, commissions) and statutory income (e.g. assessable balancing adjustments when disposing of depreciating assets).
+- Capital expenses (e.g. buying equipment, vehicles, or premises) are generally NOT immediately deductible — they are written off over time under the depreciation/capital allowance rules, though eligible small businesses can use instant asset write-off and the small business depreciation pool.
+
+Other things to get right:
+- Prepaid expenses may need to be spread over the period they relate to, depending on the amount and your business size.
+- Expenses with both business and private elements must be apportioned — only the business portion is deductible.
+- Distinguishing revenue expenses (immediately deductible) from capital expenses (depreciated) is one of the most common areas of error.
+
+Records required: invoices, receipts, and bank statements for all income and expenses, generally kept for 5 years.

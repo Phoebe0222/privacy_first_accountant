@@ -1,0 +1,47 @@
+Source: https://www.ato.gov.au/businesses-and-organisations/income-deductions-and-concessions/income-and-deductions-for-business
+Category: small_business
+Tax Year: 2025-2026
+Audience: business
+
+Small Business Income and Deductions
+
+General deductibility principle (ITAA 1997 s8-1):
+You can deduct a loss or outgoing to the extent it is incurred in gaining or producing your assessable income, or necessarily incurred in carrying on a business for that purpose.
+You cannot deduct capital, private, domestic, or exempt-income expenses.
+
+Common fully deductible business expenses:
+- Advertising and marketing (Google Ads, social media, print)
+- Bank fees and merchant service fees
+- Business travel (accommodation, transport — not private)
+- Equipment repairs and maintenance
+- Insurance premiums (business-related)
+- Legal and accounting fees
+- Office supplies and stationery
+- Professional subscriptions and memberships
+- Salaries, wages, and superannuation paid to employees
+- Software subscriptions (SaaS tools used in business)
+- Website hosting and domain names
+
+Meals and entertainment (50% rule):
+Meal entertainment expenses are generally only 50% deductible under the FBT rules.
+Client lunches, team dinners, and staff functions may be limited to 50%.
+
+Superannuation:
+Contributions for employees are deductible when paid.
+Sole traders and partners can claim personal super contributions if they notify their fund (notice of intent to claim).
+
+Motor vehicle expenses: see vehicle rules.
+Home office: see home office rules.
+
+Small business concessions (turnover < $10 million):
+- Simplified depreciation: instant asset write-off for eligible assets (threshold confirmed annually).
+- Immediate deduction for start-up costs (professional advice, ASIC fees).
+- Small business income tax offset for sole traders: up to $1,000 per year.
+- Trading stock: simplified rules for low-value stock.
+
+Pre-paid expenses:
+If you prepay an expense for a period not exceeding 12 months that ends in the next income year, you can claim the full deduction in the year of payment.
+
+Records required:
+Keep records for 5 years from when you lodged the relevant tax return.
+Records must explain all transactions and be in English (or translatable).

@@ -1,0 +1,21 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/superannuation-related-tax-offsets
+Category: super_related_offsets
+Tax Year: 2025-2026
+Audience: both
+
+Superannuation-Related Tax Offsets
+
+These offsets relate to personal decisions about superannuation contributions and income streams — they are separate from your employer's compulsory Superannuation Guarantee contributions, which are not assessable income to you.
+
+1. Tax offset for super contributions on behalf of your spouse:
+- If you contribute to your spouse's (married or de facto) super fund as a non-concessional (after-tax) contribution, you may be able to claim an offset of up to $540.
+- Offset = 18% of the lesser of: (a) your spouse contributions for the year, or (b) $3,000 minus every $1 by which your spouse's income exceeds $37,000.
+- The offset cuts out completely once your spouse's income reaches $40,000.
+- Your spouse must be under 75 (or meet the work test if aged 67–74) at the time of the contribution.
+
+2. Super income stream tax offset:
+- Available if you receive an income stream (pension or annuity) from a superannuation fund in certain circumstances — most commonly where you are receiving a disability super benefit income stream while under your preservation age, or where the income stream includes an "untaxed element" (e.g. from some government or defined benefit funds).
+- The offset is typically 15% of the taxed element, or 10% of the untaxed element, of the taxable component of the income stream.
+- The amount of the offset is usually shown on the PAYG payment summary (or income statement) provided by your super fund — you don't need to calculate it yourself.
+
+Both offsets are claimed through your tax return and are non-refundable.

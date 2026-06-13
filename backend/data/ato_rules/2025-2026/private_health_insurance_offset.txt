@@ -1,0 +1,24 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/private-health-insurance-offset
+Category: private_health_insurance_offset
+Tax Year: 2025-2026
+Audience: both
+
+Private Health Insurance Offset (Rebate)
+
+The private health insurance (PHI) rebate is a government contribution toward the cost of your private health insurance premiums (hospital cover, general/extras cover, or combined cover).
+
+Income-tested:
+- The rebate percentage you're entitled to decreases as your income increases, across several income tiers, and cuts out completely above the top income threshold.
+- If your income is above the top threshold and you don't hold an appropriate level of private hospital cover, you may also be liable for the Medicare Levy Surcharge (an additional 1–1.5% on top of the standard Medicare levy).
+
+How you receive it — two options:
+1. Reduced premiums — your health insurer applies the rebate directly, reducing the premium you pay throughout the year, based on your estimated income tier.
+2. Tax offset — claimed through your tax return, either because you chose not to take the premium reduction, or to "true up" if your actual income for the year differs from the estimate used by your insurer.
+
+True-up at tax time:
+- If your actual income was lower than estimated, you may be entitled to an additional rebate (refund/offset).
+- If your actual income was higher than estimated, you may need to repay some of the rebate you already received — this shows as an "excess private health insurance reduction or refund" amount, which increases your tax payable (it is the reverse of the offset).
+
+Income thresholds and rebate percentages are indexed annually — confirm the current 2025-26 figures.
+
+Records required: your annual private health insurance statement from your insurer, showing premiums paid, the rebate received, and your share of the policy.

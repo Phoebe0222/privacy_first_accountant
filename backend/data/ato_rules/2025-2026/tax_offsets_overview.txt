@@ -1,0 +1,27 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets
+Category: tax_offsets_overview
+Tax Year: 2025-2026
+Audience: both
+
+Tax Offsets — Overview
+
+A tax offset (sometimes called a rebate) directly reduces the amount of tax you have to pay — dollar for dollar. This is different from a deduction, which reduces your taxable income before tax is calculated.
+
+Most tax offsets are non-refundable: they can reduce your tax payable to $0, but any excess is not refunded and (with limited exceptions) cannot be carried forward to a future year.
+
+Most offsets are calculated automatically by the ATO from information already in your tax return or reported by third parties (e.g. Centrelink, your super fund, your health insurer) — you usually don't need to make a separate claim.
+
+Common individual tax offsets include:
+- Low income tax offset (LITO) — see below
+- Seniors and pensioners tax offset (SAPTO)
+- Superannuation-related tax offsets (spouse contributions, super income stream)
+- Beneficiary tax offset, and offset for maintaining an invalid or invalid carer
+- Private health insurance offset
+- Zone and overseas forces tax offsets
+- Foreign income tax offset
+
+Low Income Tax Offset (LITO):
+- Maximum offset: $700, for taxable income of $37,500 or less.
+- Between $37,500 and $45,000: the offset reduces by 5 cents for every $1 over $37,500 (down to $325 at $45,000).
+- Between $45,000 and $66,667: the offset reduces by a further 1.5 cents for every $1 over $45,000 (down to $0 at $66,667).
+- Applies automatically — no application needed, and it is factored into the ATO's tax calculation and most pay-as-you-go withholding schedules.

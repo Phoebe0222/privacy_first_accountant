@@ -1,0 +1,34 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/deductions-you-can-claim/work-related-deductions/tools-computers-and-items-you-use-for-work
+Category: tools
+Tax Year: 2025-2026
+Audience: both
+
+Tools, Equipment, and Other Assets
+
+You can claim a deduction for tools and equipment you use for work.
+
+Immediate deduction (items costing $300 or less):
+If an item costs $300 or less and is used wholly or mainly for work, you can claim the full cost in the year you buy it.
+If the item is also used privately, you can only claim the work-related portion, and only if that portion is $300 or less.
+
+Decline in value (depreciation) for items over $300:
+You must depreciate items costing more than $300 over their effective life (as determined by the ATO).
+Common effective lives: laptops 3 years, smartphones 3 years, cameras 5 years, power tools 7–13 years.
+Use the prime cost or diminishing value method consistently for each asset.
+
+Small business instant asset write-off:
+Small business entities (aggregated turnover < $10 million) can immediately deduct the business portion of eligible depreciating assets.
+The threshold and eligibility rules are set annually in the federal budget — confirm the current threshold for 2025-26.
+
+Repairs vs. improvements:
+Repairs to existing tools and equipment are deductible in the year incurred.
+Improvements that extend the life or increase the value of an asset must be depreciated.
+
+Computers and technology:
+Laptops, tablets, monitors, and external hard drives used for work: deductible (depreciate if over $300).
+Work-related software subscriptions: fully deductible in year incurred.
+Software purchased outright (not subscription): depreciate if over $300.
+
+Records required:
+Receipt or invoice for each item.
+For mixed private/work use: record of work-use percentage with supporting evidence.

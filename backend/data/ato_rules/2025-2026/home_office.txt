@@ -1,0 +1,32 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/deductions-you-can-claim/work-related-deductions/working-from-home-expenses
+Category: home_office
+Tax Year: 2025-2026
+Audience: both
+
+Home Office Expenses
+
+You can claim a deduction for additional expenses you incur when working from home. There are two methods:
+
+1. Fixed Rate Method (67 cents per hour from 1 July 2022 onward)
+Covers: electricity and gas for heating, cooling, and lighting; internet; phone; stationery and computer consumables; and decline in value of furniture and equipment used for work.
+You must keep a record of hours worked from home (a timesheet, diary, or similar).
+You cannot separately claim internet or phone if using this method — they are already included.
+
+2. Actual Cost Method
+Claim the actual work-related portion of each expense separately.
+Requires detailed records: receipts, bills, and a reasonable basis for apportionment.
+You can also claim decline in value (depreciation) of home office equipment and furniture under this method.
+
+What you cannot claim under either method:
+- Mortgage interest, rent, or rates (unless you carry on a business from home with a dedicated space)
+- Coffee, tea, milk for home consumption
+- General household items
+
+Dedicated home office (running a business from home):
+If you have a room set aside exclusively and regularly for business, you may be able to claim occupancy expenses (rent, mortgage interest, rates) apportioned by floor area and time used.
+You must have a genuine, permanent place of business at home — not just occasional work.
+
+Decline in value (depreciation) of equipment:
+Assets costing more than $300 must be depreciated over their effective life.
+Assets costing $300 or less used exclusively for work can be claimed in full immediately.
+Small business entities may use simplified depreciation rules (instant asset write-off).

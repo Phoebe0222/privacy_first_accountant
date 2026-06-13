@@ -1,0 +1,18 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/beneficiary-tax-offset
+Category: beneficiary_invalid_carer_offset
+Tax Year: 2025-2026
+Audience: both
+
+Beneficiary Tax Offset, and Offset for Maintaining an Invalid or Invalid Carer
+
+1. Beneficiary tax offset:
+- Applies if you received certain taxable Australian Government allowances or payments during the year — for example JobSeeker Payment, Youth Allowance, Austudy, ABSTUDY, parenting payment (partnered), or similar Centrelink income support payments.
+- The offset ensures you generally don't pay tax on the portion of these payments that would otherwise fall below an equivalent tax-free threshold.
+- Calculated automatically by the ATO using the payment summary / income statement data reported by Centrelink — no separate claim is needed.
+
+2. Offset for maintaining an invalid or invalid carer:
+- Available if you financially maintain a dependant who is: your (or your spouse's) child aged 16 or over who is an invalid, your (or your spouse's) sibling aged 16 or over who is an invalid or invalid carer, or your spouse's parent — and that dependant receives a disability support pension or special needs/carer payment.
+- The dependant's adjusted taxable income (ATI) must be below a threshold for you to receive the full offset; the offset reduces by $1 for every $4 the dependant's ATI exceeds that threshold, and cuts out entirely above an upper limit.
+- See also: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/offset-for-maintaining-an-invalid-or-invalid-carer
+
+Both offsets are non-refundable — they reduce tax payable to a minimum of $0, with unused amounts not refunded or carried forward.

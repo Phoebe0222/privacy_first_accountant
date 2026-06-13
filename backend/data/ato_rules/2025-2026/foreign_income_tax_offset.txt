@@ -1,0 +1,26 @@
+Source: https://www.ato.gov.au/individuals-and-families/income-deductions-offsets-and-records/tax-offsets/claiming-a-foreign-income-tax-offset
+Category: foreign_income_tax_offset
+Tax Year: 2025-2026
+Audience: both
+
+Foreign Income Tax Offset (FITO)
+
+Australian residents are taxed on worldwide income. If you've paid foreign tax on income or gains that are also taxed in Australia, the Foreign Income Tax Offset (FITO) gives you a credit for the foreign tax paid, to avoid being taxed twice on the same income.
+
+Key rules:
+- You must have actually paid (or be deemed to have paid) the foreign tax, and the related foreign income or gain must be included in your assessable income for Australian tax purposes.
+- The offset is capped — generally limited to the amount of Australian tax payable on that foreign income (the "FITO limit").
+- If the total foreign tax you paid across all foreign income for the year is $1,000 or less, you can claim the full amount as your offset without working out the limit.
+- If it's more than $1,000, you need to calculate the FITO limit; any foreign tax paid above the limit cannot be refunded, carried forward, or (in most cases) deducted.
+
+Applies to various income types:
+- Foreign employment income and foreign pensions
+- Foreign investment income (interest, dividends, royalties)
+- Foreign business income
+- Capital gains on foreign assets
+
+Records required:
+- Evidence of the foreign income, converted to AUD at the applicable exchange rate.
+- Evidence of the foreign tax paid (e.g. foreign tax assessment notice, withholding statements/certificates).
+
+Non-refundable — cannot reduce your Australian tax liability below $0.
