@@ -269,6 +269,4 @@ Vector DB:
 - tax explanations
 ### Phase 4
 - forecast modeling
-- accountant collaboration mode
-- one-click export
 - audit trail
