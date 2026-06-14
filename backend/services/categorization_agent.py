@@ -27,6 +27,7 @@ The Tax Kind Agent always runs, regardless of how the category was resolved.
 
 import logging
 import os
+import re
 from collections import Counter
 from typing import Optional
 
@@ -71,13 +72,17 @@ class LLMCategorizationResult(BaseModel):
 
 # ── Agent 1: Deterministic rule matching ─────────────────────────────────────
 
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+
 def _apply_rules(state: CategorizationState) -> CategorizationState:
     if state.category is not None:
         return state
     from backend.services.constants import INCOME_CATEGORIES
-    text = f"{state.vendor} {state.description}".lower()
+    text = _NORMALIZE_RE.sub(" ", f"{state.vendor} {state.description}".lower())
     for pattern, category in state.rules:
-        if pattern.lower() in text:
+        pattern_norm = _NORMALIZE_RE.sub(" ", pattern.lower())
+        if pattern_norm and pattern_norm in text:
             if state.tx_type == "income" and category not in INCOME_CATEGORIES:
                 continue
             if state.tx_type == "expense" and category in INCOME_CATEGORIES:

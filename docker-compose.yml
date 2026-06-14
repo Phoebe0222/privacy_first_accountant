@@ -57,6 +57,8 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
     environment:
       - OLLAMA_BASE=http://ollama:11434
       - DATABASE_URL=sqlite:////app/data/accountant.db

@@ -79,12 +79,17 @@ def update_transaction(
     amount: Optional[float] = None,
 ) -> str:
     """
-    Update fields of a transaction by its ID. Only supply the fields you want to change.
+    Update fields of a single transaction by its ID. Only supply the fields you want to change.
     Updating category also clears the needs_review flag automatically.
+    To update MULTIPLE transactions at once (e.g. "mark all these as subscription"),
+    use bulk_update_category instead — do not call this tool in a loop.
     Returns a confirmation message or an error.
     """
     from backend.database import SessionLocal
     from backend.models import Transaction
+    from backend.services.constants import VALID_CATEGORIES
+    if category is not None and category not in VALID_CATEGORIES:
+        return f"'{category}' is not a valid category. Valid categories: {', '.join(sorted(VALID_CATEGORIES))}"
     db = SessionLocal()
     try:
         t = db.get(Transaction, transaction_id)
@@ -112,6 +117,42 @@ def update_transaction(
             return "No changes specified."
         db.commit()
         return f"Updated transaction {transaction_id}: {', '.join(changes)}."
+    finally:
+        db.close()
+
+
+@tool
+def bulk_update_category(transaction_ids: list[int], category: str) -> str:
+    """
+    Set the category for multiple transactions at once, in a single call.
+    Use this whenever the user wants the same change applied to several
+    transactions (e.g. "mark all these Netflix charges as subscription").
+    Clears the needs_review flag and sets category_confidence to 1.0 for each.
+    Returns how many were updated and lists any IDs that were not found.
+    """
+    from backend.database import SessionLocal
+    from backend.models import Transaction
+    from backend.services.constants import VALID_CATEGORIES
+    if category not in VALID_CATEGORIES:
+        return f"'{category}' is not a valid category. Valid categories: {', '.join(sorted(VALID_CATEGORIES))}"
+    db = SessionLocal()
+    try:
+        updated_ids = []
+        not_found = []
+        for tid in transaction_ids:
+            t = db.get(Transaction, tid)
+            if not t:
+                not_found.append(tid)
+                continue
+            t.category = category
+            t.needs_review = False
+            t.category_confidence = 1.0
+            updated_ids.append(tid)
+        db.commit()
+        msg = f"Updated {len(updated_ids)} transaction(s) to category '{category}': {updated_ids}."
+        if not_found:
+            msg += f" Not found: {not_found}."
+        return msg
     finally:
         db.close()
 
@@ -185,7 +226,7 @@ async def query_tax_rules(question: str, year: str = "2025-2026") -> str:
 
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
-_TOOLS = [search_transactions, update_transaction, get_financial_summary, query_tax_rules]
+_TOOLS = [search_transactions, update_transaction, bulk_update_category, get_financial_summary, query_tax_rules]
 _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
 
 _SYSTEM = (
@@ -194,7 +235,13 @@ _SYSTEM = (
     "Guidelines:\n"
     "- To answer questions about transactions, call search_transactions or get_financial_summary.\n"
     "- To answer questions about tax deductibility or ATO rules, call query_tax_rules.\n"
-    "- To change a transaction, first search to confirm it exists, then call update_transaction.\n"
+    "- To change a single transaction, first search to confirm it exists, then call update_transaction.\n"
+    "- To change the category of MULTIPLE transactions, first search to collect their IDs, "
+    "then call bulk_update_category ONCE with all the IDs. Never call update_transaction "
+    "repeatedly in a loop for the same kind of change.\n"
+    "- Never tell the user a transaction was changed unless a tool result confirms that exact "
+    "ID was updated. If you ran out of tool calls before finishing, say so honestly instead "
+    "of listing changes that didn't happen.\n"
     "- Always confirm what was changed or found. Be concise. Format amounts as $X.XX AUD.\n"
     "- When citing ATO rules, include the source URL."
 )

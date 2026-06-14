@@ -97,6 +97,11 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                 )
             )
 
+            # Keep the raw text around for categorisation — normalisation can
+            # compress a description like "PAY/SALARY FROM ANZ 898274" down to
+            # just "ANZ", losing keywords (e.g. "salary") that rules/LLM need.
+            tx["_raw_text"] = f"{raw_vendor} {raw_desc}".strip()
+
             tx["vendor"] = desc_norm if use_desc else vendor_norm
             if tx.get("description") == raw_vendor:
                 tx["description"] = tx["vendor"]
@@ -115,7 +120,7 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
                 if key not in pending:
                     pending[key] = (
                         tx["vendor"],
-                        tx.get("description", ""),
+                        tx.get("_raw_text") or tx.get("description", ""),
                         float(tx.get("amount") or 0),
                         tx.get("type", "expense"),
                         tx.get("category", ""),

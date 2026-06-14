@@ -214,6 +214,10 @@ _PROMPT = ChatPromptTemplate.from_messages([
      "7. Remove 'HK RE ...' address sequences.\n"
      "8. Remove platform descriptors: E-commerce, Holdings, Group, International.\n"
      "9. Title-case all-uppercase names.\n"
+     "10. For ATM withdrawals, the vendor is the ATM's location, not the bank that issued the "
+     "card — drop the leading bank name and return 'ATM <Location> Branch':\n"
+     "   'ANZ ATM DOCKLANDS BRANCH #2 DOCKLANDS VIC' → 'ATM Docklands Branch'\n"
+     "   'CBA ATM WITHDRAWAL COLLINS ST MELBOURNE' → 'ATM Collins St'\n"
      "Return ONLY the JSON object."),
     ("human", "Vendor: {vendor}"),
 ])

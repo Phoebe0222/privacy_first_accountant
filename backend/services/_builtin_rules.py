@@ -1,6 +1,9 @@
 """Built-in vendor → category rules. Seeded into the vendor_rules DB table on first startup."""
 
 BUILT_IN_RULES: list[tuple[str, str]] = sorted([
+    ("salary", "salary"),
+    ("payroll", "salary"),
+
     ("uber eats", "food"),
     ("doordash", "food"),
     ("menulog", "food"),
