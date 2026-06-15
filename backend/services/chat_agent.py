@@ -1,6 +1,29 @@
 """
 Chat agent with tool calling for database read/write operations.
 
+  ┌──────────────────────┐
+  │  LLM + bound tools   │  decide: call a tool, or reply in plain text
+  └──────────┬───────────┘
+             │
+             ├─ tool call ──► run it, append result as ToolMessage, repeat
+             │   (search_transactions, update_transaction,
+             │    bulk_update_category, get_financial_summary,
+             │    query_tax_rules)
+             │
+             └─ plain-text reply
+                  │
+                  ▼
+       ┌────────────────────┐
+       │  Claim guard       │  claims an update was made, or lists
+       └──────────┬─────────┘  "ID:n" rows, with no tool call this round?
+                  │
+                  ├─ yes ──► inject correction message, repeat
+                  │
+                  └─ no  ──► return reply to user
+
+  Repeats up to 5 rounds total; if exhausted with no plain-text reply,
+  returns "I wasn't able to complete that in time. Please try rephrasing.
+  
 Uses a separate CHAT_MODEL (default: qwen2.5:14b) — larger than EXTRACT_MODEL
 so tool calling and instruction following are reliable.
 
@@ -9,6 +32,7 @@ fed back → repeat until the LLM produces a plain text reply (max 5 rounds).
 """
 import logging
 import os
+import re
 from typing import Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -70,7 +94,7 @@ def search_transactions(
 
 
 @tool
-def update_transaction(
+async def update_transaction(
     transaction_id: int,
     category: Optional[str] = None,
     vendor: Optional[str] = None,
@@ -87,6 +111,7 @@ def update_transaction(
     """
     from backend.database import SessionLocal
     from backend.models import Transaction
+    from backend.services import rag
     from backend.services.constants import VALID_CATEGORIES
     if category is not None and category not in VALID_CATEGORIES:
         return f"'{category}' is not a valid category. Valid categories: {', '.join(sorted(VALID_CATEGORIES))}"
@@ -116,13 +141,15 @@ def update_transaction(
         if not changes:
             return "No changes specified."
         db.commit()
+        # Re-index so future categorisation can learn from this correction via history consensus.
+        await rag.index_transaction(t)
         return f"Updated transaction {transaction_id}: {', '.join(changes)}."
     finally:
         db.close()
 
 
 @tool
-def bulk_update_category(transaction_ids: list[int], category: str) -> str:
+async def bulk_update_category(transaction_ids: list[int], category: str) -> str:
     """
     Set the category for multiple transactions at once, in a single call.
     Use this whenever the user wants the same change applied to several
@@ -132,6 +159,7 @@ def bulk_update_category(transaction_ids: list[int], category: str) -> str:
     """
     from backend.database import SessionLocal
     from backend.models import Transaction
+    from backend.services import rag
     from backend.services.constants import VALID_CATEGORIES
     if category not in VALID_CATEGORIES:
         return f"'{category}' is not a valid category. Valid categories: {', '.join(sorted(VALID_CATEGORIES))}"
@@ -139,6 +167,7 @@ def bulk_update_category(transaction_ids: list[int], category: str) -> str:
     try:
         updated_ids = []
         not_found = []
+        updated: list[Transaction] = []
         for tid in transaction_ids:
             t = db.get(Transaction, tid)
             if not t:
@@ -148,7 +177,11 @@ def bulk_update_category(transaction_ids: list[int], category: str) -> str:
             t.needs_review = False
             t.category_confidence = 1.0
             updated_ids.append(tid)
+            updated.append(t)
         db.commit()
+        # Re-index so future categorisation can learn from this correction via history consensus.
+        for t in updated:
+            await rag.index_transaction(t)
         msg = f"Updated {len(updated_ids)} transaction(s) to category '{category}': {updated_ids}."
         if not_found:
             msg += f" Not found: {not_found}."
@@ -229,6 +262,21 @@ async def query_tax_rules(question: str, year: str = "2025-2026") -> str:
 _TOOLS = [search_transactions, update_transaction, bulk_update_category, get_financial_summary, query_tax_rules]
 _TOOLS_BY_NAME = {t.name: t for t in _TOOLS}
 
+# Matches a final reply that *claims* a transaction was changed (past tense /
+# already-done framing). Used to catch the model fabricating a "done" summary
+# without ever having called update_transaction/bulk_update_category.
+_CLAIM_RE = re.compile(
+    r"\bi(?:'ve| have)\s+(?:updated|changed|categori[sz]ed|re-?categori[sz]ed|marked)\b"
+    r"|\b(?:have|has|are|is)\s+(?:been|now)\s+(?:updated|changed|categori[sz]ed|marked)\b"
+    r"|\bsuccessfully\s+(?:updated|changed|categori[sz]ed)\b",
+    re.IGNORECASE,
+)
+
+# Matches the "ID:<n>" format that search_transactions puts on each result row.
+# Smaller models sometimes pattern-match this format from earlier tool output
+# and invent new rows for a different query instead of calling the tool again.
+_RESULT_CLAIM_RE = re.compile(r"\bID:\d+\b")
+
 _SYSTEM = (
     "You are a private business accountant assistant for an Australian small business. "
     "You have tools to query and update the transaction database, and to look up ATO tax rules.\n\n"
@@ -261,16 +309,43 @@ async def chat(messages: list[dict], system_context: str = "") -> str:
         elif m["role"] == "assistant":
             lc_messages.append(AIMessage(content=m["content"]))
 
-    llm_with_tools = get_llm(model=CHAT_MODEL).bind_tools(_TOOLS)
+    # Default Ollama num_ctx (2048) is too small once the 5 tool schemas, system
+    # prompt, and 10 messages of chat history are all in the prompt — the model
+    # silently loses the tool definitions and falls back to a plain-text guess.
+    llm_with_tools = get_llm(model=CHAT_MODEL, num_ctx=8192).bind_tools(_TOOLS)
+
+    made_write_change = False
+    made_tool_call = False
 
     for _ in range(5):
         response = await llm_with_tools.ainvoke(lc_messages)
         lc_messages.append(response)
 
         if not response.tool_calls:
-            return response.content
+            content = response.content or ""
+            if not made_write_change and _CLAIM_RE.search(content):
+                log.warning("CHAT hallucinated update claim, nudging | %s", content[:200])
+                lc_messages.append(HumanMessage(content=(
+                    "You just claimed a transaction was changed, but you have not "
+                    "successfully called update_transaction or bulk_update_category "
+                    "in this conversation. Either call the correct tool now using the "
+                    "IDs already found, or tell the user honestly that no change has "
+                    "been made yet."
+                )))
+                continue
+            if not made_tool_call and _RESULT_CLAIM_RE.search(content):
+                log.warning("CHAT hallucinated search result, nudging | %s", content[:200])
+                lc_messages.append(HumanMessage(content=(
+                    "You listed transaction details, but you have not called "
+                    "search_transactions or get_financial_summary in this conversation. "
+                    "Call the appropriate tool now to get real data, then answer based "
+                    "on its results."
+                )))
+                continue
+            return content
 
         for tc in response.tool_calls:
+            made_tool_call = True
             tool_fn = _TOOLS_BY_NAME.get(tc["name"])
             if tool_fn is None:
                 result = f"Unknown tool: {tc['name']}"
@@ -279,6 +354,8 @@ async def chat(messages: list[dict], system_context: str = "") -> str:
                     result = await tool_fn.ainvoke(tc["args"])
                 except Exception as e:
                     result = f"Tool error: {e}"
+            if tc["name"] in ("update_transaction", "bulk_update_category") and str(result).startswith("Updated"):
+                made_write_change = True
             log.info("CHAT TOOL | %s(%s) → %s", tc["name"], tc["args"], str(result)[:200])
             lc_messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 

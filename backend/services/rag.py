@@ -68,13 +68,30 @@ def remove_transaction(transaction_id: int) -> None:
     except Exception:
         pass
 
-async def search(query: str, n_results: int = 15) -> list[str]:
+async def search(query: str, n_results: int = 15, max_distance: Optional[float] = None) -> list[dict]:
+    """
+    Search the transactions collection for similar past transactions.
+    Returns results sorted by similarity (most similar first), each as:
+      {"text": str, "metadata": dict, "distance": float}
+    `metadata` holds id, type, category, date, vendor, amount — read these
+    instead of re-parsing `text`, which is meant for embedding/LLM context.
+    `distance` is cosine distance (0 = identical, 2 = opposite). If
+    `max_distance` is given, weaker matches are dropped so they don't get
+    treated as relevant by callers doing consensus voting.
+    """
+    if _col.count() == 0:
+        return []
     embedding = await _embed(query)       # ← embed the question
     results = _col.query(
         query_embeddings=[embedding],     # ← compare against all stored vectors
-        n_results=min(n_results, _col.count()),  # ← return top 15 matches
+        n_results=min(n_results, _col.count()),
     )
-    return results["documents"][0]        # ← the matching transaction texts
+    out = []
+    for doc, meta, dist in zip(results["documents"][0], results["metadatas"][0], results["distances"][0]):
+        if max_distance is not None and dist > max_distance:
+            continue
+        out.append({"text": doc, "metadata": meta, "distance": dist})
+    return out
 
 
 

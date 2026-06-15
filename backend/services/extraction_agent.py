@@ -50,6 +50,7 @@ log = logging.getLogger(__name__)
 OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
 EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "llama3.2:3b")
 VISION_MODEL = os.getenv("VISION_MODEL", "moondream2")
+RAG_MAX_DISTANCE = 0.6  # cosine distance cutoff — drop matches that aren't meaningfully similar
 
 
 # ── Pipeline state ────────────────────────────────────────────────────────────
@@ -307,8 +308,8 @@ async def _rag_search_step(state: ExtractionState) -> ExtractionState:
         return state
     try:
         from backend.services import rag
-        similar = await rag.search(state.text[:300], n_results=5)
-        return state.model_copy(update={"similar_docs": similar})
+        results = await rag.search(state.text[:300], n_results=5, max_distance=RAG_MAX_DISTANCE)
+        return state.model_copy(update={"similar_docs": [r["text"] for r in results]})
     except Exception:
         return state
 

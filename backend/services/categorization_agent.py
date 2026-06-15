@@ -42,6 +42,7 @@ OLLAMA_BASE = os.getenv("OLLAMA_BASE", "http://localhost:11434")
 EXTRACT_MODEL = os.getenv("EXTRACT_MODEL", "llama3.2:3b")
 CONFIDENCE_THRESHOLD = 0.7
 HISTORY_THRESHOLD = 0.8
+HISTORY_MAX_DISTANCE = 0.6  # cosine distance cutoff — drop matches that aren't meaningfully similar
 
 
 # ── Pipeline state ────────────────────────────────────────────────────────────
@@ -65,9 +66,11 @@ class CategorizationState(BaseModel):
 # ── Structured output schema ──────────────────────────────────────────────────
 
 class LLMCategorizationResult(BaseModel):
+    # reasoning is generated first so category/confidence are conditioned on it,
+    # rather than being a post-hoc justification for an answer already committed to.
+    reasoning: str = Field(description="One sentence explaining the choice")
     category: str = Field(description="Transaction category from the allowed list")
     confidence: float = Field(description="Confidence score 0.0 to 1.0", ge=0.0, le=1.0)
-    reasoning: str = Field(description="One sentence explaining the choice")
 
 
 # ── Agent 1: Deterministic rule matching ─────────────────────────────────────
@@ -105,23 +108,24 @@ async def _search_history(state: CategorizationState) -> CategorizationState:
     try:
         from backend.services.rag import search
         results = await search( # search for similar past transactions to find consensus category for this vendor/description
-            f"vendor:{state.vendor} {state.description[:100]}", n_results=10
+            f"vendor:{state.vendor} {state.description[:100]}", n_results=10, max_distance=HISTORY_MAX_DISTANCE
         )
     except Exception:
         return state
 
+    from backend.services.constants import VALID_CATEGORIES
     categories: list[str] = []
     vendor_lower = state.vendor.lower()
     desc_lower = (state.description or "").lower()
-    for doc in results:
-        doc_vendor, doc_category, doc_desc = "", "", ""
-        for line in doc.split("\n"):
-            if line.startswith("Vendor:"):
-                doc_vendor = line.split(":", 1)[1].strip().lower()
-            elif line.startswith("Category:"):
-                doc_category = line.split(":", 1)[1].strip().lower()
-            elif line.startswith("Description:"):
+    for r in results:
+        meta = r["metadata"]
+        doc_vendor = (meta.get("vendor") or "").lower()
+        doc_category = (meta.get("category") or "").lower()
+        doc_desc = ""
+        for line in r["text"].split("\n"):
+            if line.startswith("Description:"):
                 doc_desc = line.split(":", 1)[1].strip().lower()
+                break
 
         vendor_match = bool(
             vendor_lower and doc_vendor
@@ -134,7 +138,6 @@ async def _search_history(state: CategorizationState) -> CategorizationState:
         )
         if not vendor_match and not desc_match:
             continue
-        from backend.services.constants import VALID_CATEGORIES
         if doc_category and doc_category != "other" and doc_category in VALID_CATEGORIES:
             categories.append(doc_category)
 
@@ -176,9 +179,7 @@ _PROMPT = ChatPromptTemplate.from_messages([
         "use the description to identify the real merchant or purpose.\n"
         "Step 2 — Which category fits best?\n"
         "Step 3 — How confident are you in the category? (0.0–1.0)\n\n"
-        "Amount hint: if the amount is under $15 and the vendor is a coffee shop, "
-        "bubble tea, or café — use 'drink', not 'food'. "
-        "Use 'drink' for coffee, tea, bubble tea, smoothies. "
+        "Use 'drink' for coffee, cafe, tea, cha, bubble tea, smoothies. "
         "Use 'food' for meals, restaurants, takeaway.\n\n"
         "Valid expense categories: food, grocery, drink, transport, travel, utilities, "
         "software, marketing, fee, gym, medical, office, home_office, subscription, shopping, "

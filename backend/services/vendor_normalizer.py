@@ -146,23 +146,22 @@ def _rules_step(state: VendorState) -> VendorState:
 
 # ── Step 2: RAG ───────────────────────────────────────────────────────────────
 
+VENDOR_MAX_DISTANCE = 0.6  # cosine distance cutoff — drop matches that aren't meaningfully similar
+
+
 async def _rag_step(state: VendorState) -> VendorState:
     if state.result is not None:
         return state
     try:
         from backend.services import rag
-        results = await rag.search(f"vendor:{state.cleaned}", n_results=10)
+        results = await rag.search(f"vendor:{state.cleaned}", n_results=10, max_distance=VENDOR_MAX_DISTANCE)
     except Exception:
         return state
 
     vendor_lower = state.cleaned.lower()
     names: list[str] = []
-    for doc in results:
-        doc_vendor = ""
-        for line in doc.split("\n"):
-            if line.startswith("Vendor:"):
-                doc_vendor = line.split(":", 1)[1].strip()
-                break
+    for r in results:
+        doc_vendor = r["metadata"].get("vendor") or ""
         if not doc_vendor:
             continue
         # Normalize the candidate so stale DB entries don't propagate wrong names

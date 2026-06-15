@@ -103,8 +103,6 @@ async def _run_csv(job_id: str, headers: list, rows: list, filename: str, source
             tx["_raw_text"] = f"{raw_vendor} {raw_desc}".strip()
 
             tx["vendor"] = desc_norm if use_desc else vendor_norm
-            if tx.get("description") == raw_vendor:
-                tx["description"] = tx["vendor"]
 
         db = SessionLocal()
         try:

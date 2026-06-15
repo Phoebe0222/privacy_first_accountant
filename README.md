@@ -13,7 +13,7 @@ tax optimization recommendations (with explanation and confidence)
 It's a safe and intelligent financial operations assistant for Australian small businesses, sole traders, or any individuals who want to do their own accounting. 
 
 ## Core Feature
-
+TODO: put some screenshots here
 The data pipeline:
 source -> parse -> extract -> catergorize -> store locally 
 ### 1. Data ingestion
@@ -48,6 +48,7 @@ The user can ask the agent for numbers, charts, reports etc. and ask the agent t
 
 ### 5. Bank reconciliation 
 The user can reconciliate the bank transactions with receipts from different sources, e.g. email, pdf receipts, images. 
+Bank transactions come from the bank CSV exports, and reciepts can be from emails, PDFs or images upload, or supplier CSV exports. 
 
 ### 6. Anomaly detection
 Comparing to similar past transactions, if the transaction is more than twice or less than half of the average, it will be flagged.
@@ -223,33 +224,66 @@ Vector DB:
 ```
 - ### Chat agent
 ```
+  ┌──────────────────────┐
+  │  LLM + bound tools   │  decide: call a tool, or reply in plain text
+  └──────────┬───────────┘
+             │
+             ├─ tool call ──► run it, append result as ToolMessage, repeat
+             │   (search_transactions, update_transaction,
+             │    bulk_update_category, get_financial_summary,
+             │    query_tax_rules)
+             │
+             └─ plain-text reply
+                  │
+                  ▼
+       ┌────────────────────┐
+       │  Claim guard       │  claims an update was made, or lists
+       └──────────┬─────────┘  "ID:n" rows, with no tool call this round?
+                  │
+                  ├─ yes ──► inject correction message, repeat
+                  │
+                  └─ no  ──► return reply to user
+
+  Repeats up to 5 rounds total; if exhausted with no plain-text reply,
+  returns "I wasn't able to complete that in time. Please try rephrasing.
 ```
+
+
 ## Core RAG flow 
-- ### chat (maybe)
-1. user asks question
-2. embed the question (convert into a vector)
-3. search vector DB for similar vectors
-4. build the prompt with the vector (build the context)
-5. LLM answers with retrieved infomation 
+- ### similar-transaction search (`transactions` collection)
+1. embed a query — either a new transaction's text, or a `vendor:{name}` lookup
+2. search the `transactions` collection for similar past transactions
+3. reused by three different consumers, each with its own goal:
+   - extraction agent — similar transactions as anomaly context for the Fields Agent
+   - categorization agent — category consensus from past transactions (≥80% agreement resolves the category)
+   - vendor normalizer — vendor-name consensus from past transactions (≥80% agreement resolves the vendor name)
 
-- ### extraction
-1. a new transaction (either model generated or user created)
-2. embed the transaction
-3. search for similar transactions
-4. add the similar transactions in the prompt
-5. better categorization and detect anomoly 
+- ### tax interpretations (`ato_rules` collection)
+1. build a plain-English tax question (per category, from the user's chat message, or for a deduction estimate)
+2. make sure ATO rules for that year are indexed (seeded + live-fetched, cached after first use)
+3. embed the question and search the `ato_rules` collection
+4. return the top matches with their source URLs
+5. reused by three different consumers:
+   - categorization agent — classify tax_kind (business / employment / na) for a transaction
+   - chat agent — `query_tax_rules` tool, returns matches directly to the user
+   - tax agent — assess deductibility rate per category
 
-- ### tax interpretations
-1. caller builds a plain-English question — `tax_agent._assess_category_group` asks "Is `<category>` deductible for Australian employee/small business?" once per expense category, or the chat agent's `query_tax_rules` tool passes the user's own question
-2. `rag.search_ato_rules(query, year)` first calls `ensure_live_ato_rules(year)` — on first use for a tax year this live-fetches each seeded ATO page (`backend/data/ato_rules/<year>/*.txt`, whose header gives the `Source:` URL and `Category:`), strips it down to plain text, chunks it, embeds each chunk and upserts it into the `ato_rules` collection tagged `source: "live"`. Idempotent — later calls for the same year skip straight to step 3
-3. embed the question and search the `ato_rules` collection (filtered by `year`) for the closest chunks — these include both the live-fetched chunks and the bundled chunks already indexed by the `ato-init` job (`ato_fetcher.py`)
-4. return the top matches as `[{text, category, url}]`
-5. tax agent: the matched text becomes `ato_context`, fed into the `_assess` LLM prompt together with the category, vendors and total spent, returning a deductible `rate`, `reasoning` and `ato_reference`. Chat agent: the matched text and source URLs are returned to the user directly as an answer
-6. if a live page fetch fails (network error, page moved, etc.) it's logged and skipped — the bundled seed text for that category is still in the collection and continues to serve the search
 
-- ### GST categories
+## Agent self-correction
+The model itself sometimes hallucinate, e.g making numbers that do not exist, claiming it has done something without actually doing it. A prompt-only fix cannot fully solve it because the model itself only continues the conversation with the most likely answer, without knowing whether its tool is called. This should be handled by harness. The following chat agent example shows how to add a guard for a known failure.
 
-- ### deduction examples
+The chat agent runs a tool-calling loop (max 5 rounds): LLM picks a tool → harness executes it against the real DB → result fed back → repeat until the LLM returns plain text.
+
+Known failure mode: a tool-calling model can skip the tool call entirely and just narrate a fake success, e.g. replying "I have updated transactions ... to utility" with no real tool call in the logs. Prompt instructions alone don't reliably prevent this — the model has no way to "know" whether its tool call actually happened, only the harness does.
+
+Guard (harness-level, not prompt-level):
+1. Track `made_write_change` — set only when `update_transaction`/`bulk_update_category` is called **and** its result starts with `"Updated"` (i.e. it actually succeeded, not a validation error).
+2. `_CLAIM_RE` matches "done"-style phrasing in a final reply (e.g. "I've updated...", "...are now categorized...", "successfully updated...").
+3. If a reply matches `_CLAIM_RE` while `made_write_change` is still `False`, the harness doesn't return it — it injects a corrective message ("you claimed a change but didn't call the tool — call it now or tell the user honestly") and lets the model retry, within the existing 5-round budget.
+
+## User input correction
+Model hallucinate -> user correct result -> re-index the transaction -> the model uses the memory/RAG in the next task
+
 
 
 ## Roadmap
